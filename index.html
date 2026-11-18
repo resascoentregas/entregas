@@ -2,9 +2,8 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Entregas</title>
-<!-- Ícono para la pantalla de inicio (iPhone y Android) -->
 <link rel="apple-touch-icon" href="https://lh3.googleusercontent.com/d/1KREbmeflchSKmfAKPHcVAaz0-etsHKaa">
 <link rel="icon" type="image/png" href="https://lh3.googleusercontent.com/d/1KREbmeflchSKmfAKPHcVAaz0-etsHKaa">
 <link rel="manifest" href="manifest.webmanifest">
@@ -12,44 +11,119 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Entregas">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#111418">
+<meta name="theme-color" content="#0e1014">
 <style>
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
-         background: #111418; color: #eef0f3; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; text-align: center; }
-  .caja { max-width: 380px; width: 100%; }
-  img { width: 112px; height: 112px; border-radius: 26px; box-shadow: 0 8px 30px rgba(0,0,0,.5); }
-  h1 { font-size: 22px; margin: 18px 0 6px; }
-  p { color: #9aa1ad; font-size: 14.5px; line-height: 1.5; margin: 6px 0; }
-  a.boton { display: block; margin: 22px 0 18px; padding: 15px; border-radius: 14px; background: #c8102e; color: #fff;
-            font-weight: 700; font-size: 17px; text-decoration: none; }
-  .pasos { text-align: left; background: #1a1d23; border: 1px solid #2a2e36; border-radius: 14px; padding: 12px 16px; font-size: 14px; line-height: 1.6; }
-  .pasos b { color: #fff; }
+         background: #0e1014; color: #eceef2; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif; text-align: center; }
+  .caja { max-width: 360px; width: 100%; }
+  img { width: 96px; height: 96px; border-radius: 24px; box-shadow: 0 10px 34px rgba(0,0,0,.55); animation: latido 1.6s ease-in-out infinite; }
+  @keyframes latido { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+  @keyframes entra { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+  h1 { font-size: 21px; margin: 18px 0 6px; animation: entra .5s ease both .1s; }
+  p { color: #8b93a1; font-size: 14px; line-height: 1.5; margin: 6px 0; }
+  .barra { width: 120px; height: 3px; border-radius: 3px; background: #262b34; margin: 22px auto 0; overflow: hidden; }
+  .barra::after { content: ""; display: block; width: 40%; height: 100%; background: #e11d48; border-radius: 3px; animation: va 1s ease-in-out infinite; }
+  @keyframes va { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+  #form { display: none; animation: entra .4s ease both; }
+  input { width: 100%; font-size: 16px; padding: 13px 14px; border-radius: 14px; border: 1px solid #262b34; background: #171a20; color: #eceef2; margin-top: 18px; }
+  button, a.btn { display: block; width: 100%; margin-top: 12px; padding: 14px; border-radius: 14px; border: 0; background: #e11d48; color: #fff;
+                  font-weight: 750; font-size: 16px; text-decoration: none; font-family: inherit; }
+  a.btn.sec { background: #1e222a; border: 1px solid #262b34; font-weight: 650; font-size: 14.5px; }
+  #err { color: #fca5a5; min-height: 1.4em; }
 </style>
 </head>
 <body>
 <div class="caja">
-  <img src="https://lh3.googleusercontent.com/d/1KREbmeflchSKmfAKPHcVAaz0-etsHKaa" alt="Ícono de Entregas">
+  <img src="https://lh3.googleusercontent.com/d/1KREbmeflchSKmfAKPHcVAaz0-etsHKaa" alt="">
   <h1>Entregas Jeep · RAM</h1>
-  <p id="estado">Abriendo la app…</p>
-  <a class="boton" id="abrir" href="#">Abrir la app</a>
-  <div class="pasos" id="pasos">
-    <b>Para tenerla en el inicio con este ícono:</b><br>
-    📱 <b>Android (Chrome):</b> menú ⋮ → <b>Agregar a pantalla principal</b> (o "Instalar app").<br>
-    🍎 <b>iPhone (Safari):</b> botón compartir ⬆️ → <b>Agregar a inicio</b>.
+  <div id="cargando"><div class="barra"></div></div>
+  <div id="form">
+    <p>Pegá el código de acceso que te llegó por mail.</p>
+    <input id="cod" placeholder="Código de acceso" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <button id="entrar">Entrar</button>
+    <p id="err"></p>
+    <a class="btn sec" id="vieja" href="#">Entrar con mi cuenta de Google (como antes)</a>
   </div>
 </div>
 <script>
-  // Link de la app (el de siempre). Si un día cambia, solo hay que cambiarlo acá.
-  var APP = 'https://script.google.com/macros/s/AKfycbzn7PJlJKF0K5es5lEZd-x_ii8fZ2XYfdUVibRvcqHDJzjdB6Ra9vowjKOc5-fPcKxKGw/exec';
-  var esPC = window.innerWidth >= 1000 && !/Android|iPhone|iPad/i.test(navigator.userAgent);
-  var destino = APP + '?vista=' + (esPC ? 'pc' : 'cel');
-  document.getElementById('abrir').href = destino;
-  // Si se abrió desde el ícono del inicio, entra directo a la app
-  var desdeInicio = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true ||
-                    /[?&]abrir=1/.test(location.search);
-  if (desdeInicio) { location.replace(destino); }
-  else { document.getElementById('estado').textContent = 'Agregá esta página a la pantalla de inicio de tu celular.'; }
+/* La pantalla de la app vive en Google (Apps Script) pero se muestra acá, sin el cartel de Google.
+   Google queda solo como motor: cada pedido viaja con la clave secreta guardada en este aparato. */
+var VIEJA = 'https://script.google.com/macros/s/AKfycbzn7PJlJKF0K5es5lEZd-x_ii8fZ2XYfdUVibRvcqHDJzjdB6Ra9vowjKOc5-fPcKxKGw/exec';
+var esPC = window.innerWidth >= 1000 && !/Android|iPhone|iPad/i.test(navigator.userAgent);
+document.getElementById('vieja').href = VIEJA + '?vista=' + (esPC ? 'pc' : 'cel');
+
+function leer(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function guardar(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function parsear(c) { c = String(c || '').trim().replace(/^.*#c=/, ''); var p = c.split('.'); return p.length === 2 && p[0].length > 20 && p[1].length > 20 ? { u: p[0], k: p[1] } : null; }
+
+// Lo que corre DENTRO de la app: reemplaza google.script.run por pedidos a la API
+function puente() {
+  var A = window.__API, URL = 'https://script.google.com/macros/s/' + A.u + '/exec';
+  function llamar(fn, args) {
+    return fetch(URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ fn: fn, args: args, k: A.k }) })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j.ok) { if (j.e === 'Clave incorrecta') { try { localStorage.removeItem('cfgApi'); } catch (e) {} location.reload(); } throw new Error(j.e); }
+        return j.r;
+      });
+  }
+  function corredor(ok, mal) {
+    return new Proxy({}, { get: function (_, fn) {
+      if (fn === 'withSuccessHandler') return function (f) { return corredor(f, mal); };
+      if (fn === 'withFailureHandler') return function (f) { return corredor(ok, f); };
+      if (fn === 'withUserObject') return function () { return corredor(ok, mal); };
+      return function () {
+        var args = Array.prototype.slice.call(arguments);
+        llamar(fn, args).then(function (r) { if (ok) ok(r); }, function (e) {
+          if (mal) mal(e.message ? e : new Error('Sin conexión')); else console.error(e); });
+      };
+    } });
+  }
+  var q = {}; new URLSearchParams(location.search).forEach(function (v, k) { q[k] = v; });
+  window.google = { script: { run: corredor(), host: { close: function () {} },
+    url: { getLocation: function (cb) { cb({ parameter: q, parameters: {}, hash: '' }); } } } };
+  // Deja guardada la pantalla más nueva para la próxima vez que se abra
+  setTimeout(function () { llamar('_html', []).then(function (h) { try { localStorage.setItem('appHtml', h); } catch (e) {} }, function () {}); }, 4000);
+}
+
+function mostrar(html, cfg) {
+  var extra = '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">' +
+    '<meta name="theme-color" content="#0e1014"><link rel="manifest" href="manifest.webmanifest">' +
+    '<link rel="apple-touch-icon" href="https://lh3.googleusercontent.com/d/1KREbmeflchSKmfAKPHcVAaz0-etsHKaa">' +
+    '<title>Entregas</title><script>window.__API=' + JSON.stringify(cfg) + ';(' + puente.toString() + ')();<\/script>';
+  html = html.replace(/<base[^>]*>/i, '').replace(/<head>/i, '<head>' + extra);
+  document.open(); document.write(html); document.close();
+}
+
+function arrancar(cfg) {
+  var guardada = leer('appHtml');
+  if (guardada) { mostrar(guardada, cfg); return; }
+  fetch('https://script.google.com/macros/s/' + cfg.u + '/exec', { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ fn: '_html', args: [] }) })
+    .then(function (r) { return r.json(); })
+    .then(function (j) { if (!j.ok) throw new Error(j.e); guardar('appHtml', j.r); mostrar(j.r, cfg); })
+    .catch(function () { formulario('No se pudo conectar. Revisá internet o el código.'); });
+}
+
+function formulario(msg) {
+  document.getElementById('cargando').style.display = 'none';
+  document.getElementById('form').style.display = 'block';
+  document.getElementById('err').textContent = msg || '';
+}
+document.getElementById('entrar').onclick = function () {
+  var cfg = parsear(document.getElementById('cod').value);
+  if (!cfg) { document.getElementById('err').textContent = 'Ese código no parece correcto.'; return; }
+  guardar('cfgApi', JSON.stringify(cfg));
+  document.getElementById('form').style.display = 'none'; document.getElementById('cargando').style.display = 'block';
+  arrancar(cfg);
+};
+
+// Si se abrió el link del mail (#c=...), guarda el código en este aparato
+var cfg = parsear(location.hash.indexOf('#c=') === 0 ? location.hash : '');
+if (cfg) { guardar('cfgApi', JSON.stringify(cfg)); history.replaceState(null, '', location.pathname); }
+else { try { cfg = JSON.parse(leer('cfgApi') || 'null'); } catch (e) { cfg = null; } }
+if (cfg) arrancar(cfg); else formulario();
 </script>
 </body>
 </html>
