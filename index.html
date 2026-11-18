@@ -88,6 +88,7 @@ function puente() {
 }
 
 function mostrar(html, cfg) {
+  if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', function () { mostrar(html, cfg); }); return; }
   var extra = '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">' +
     '<meta name="theme-color" content="#0e1014"><link rel="manifest" href="manifest.webmanifest">' +
     '<link rel="apple-touch-icon" href="https://lh3.googleusercontent.com/d/1KREbmeflchSKmfAKPHcVAaz0-etsHKaa">' +
