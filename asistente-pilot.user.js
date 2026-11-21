@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente Entregas → Pilot
 // @namespace    resascoentregas
-// @version      2.1
+// @version      2.2
 // @description  Hace en Pilot los pasos de cada entrega que marcás en la app Entregas (pre-entrega, controles, planificar, entregado, transferir a Azul, etiqueta). Con Pilot abierto, lo hace solo cada 3 minutos, y te avisa en la app cuando un legajo pasa a "Ok para entrega" o alguien deja un comentario.
 // @match        https://app.pilotsolution.com.ar/*
 // @noframes
@@ -298,7 +298,7 @@
       const r = await W.$.post('/adminfiles/services/adminfiles.list.php', Object.assign({}, base, filtro, { page: String(pag) }));
       const d = (r && r.data) || {}; filas = filas.concat(d.dataRows || []); tot = +d.total_pages || 1; pag++;
     } while (pag <= tot && pag <= 10);
-    return filas.map(f => ({ id: String(f.admin_file_id).replace(/\D/g, ''), cliente: nombreFila(f).replace(/\w/g, c => c.toUpperCase()),
+    return filas.map(f => ({ id: String(f.admin_file_id).replace(/\D/g, ''), cliente: nombreFila(f).replace(/\d+/g, ' ').replace(/\s+/g, ' ').trim().replace(/\b\w/g, c => c.toUpperCase()),
       modelo: limpio(f.unit_description), etiqueta: limpio(f.admin_file_label_color) }));
   }
   function comentarios(html) {
@@ -321,6 +321,7 @@
       const avisos = [], primera = !GM_getValue('vigInicio', 0);
       // 1) Ok para entrega
       const ok = await listaLegajos({ label_filter: String(ETIQUETA_OK) });
+      api('pilotOkLista', [ok.map(l => ({ cliente: l.cliente, modelo: l.modelo }))]).catch(() => {});   // para la tarjeta Mi día
       const okVistos = GM_getValue('okVistos', {}), okAhora = {};
       ok.forEach(l => { okAhora[l.id] = 1; if (!primera && !okVistos[l.id]) avisos.push({ tipo: 'ok', id: 'ok|' + l.id + '|' + new Date().toDateString(), cliente: l.cliente, modelo: l.modelo }); });
       // 2) Comentarios de otros en los legajos que estás trabajando
