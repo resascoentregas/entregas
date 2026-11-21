@@ -2,9 +2,8 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Estado de autos</title>
-<!-- Ícono para la pantalla de inicio (iPhone y Android) -->
 <link rel="apple-touch-icon" href="https://lh3.googleusercontent.com/d/1KREbmeflchSKmfAKPHcVAaz0-etsHKaa">
 <link rel="icon" type="image/png" href="https://lh3.googleusercontent.com/d/1KREbmeflchSKmfAKPHcVAaz0-etsHKaa">
 <link rel="manifest" href="manifest.webmanifest">
@@ -12,44 +11,87 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Estado autos">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#111418">
+<meta name="theme-color" content="#0e1014">
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
-         background: #111418; color: #eef0f3; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; text-align: center; }
-  .caja { max-width: 380px; width: 100%; }
-  img { width: 112px; height: 112px; border-radius: 26px; box-shadow: 0 8px 30px rgba(0,0,0,.5); }
-  h1 { font-size: 22px; margin: 18px 0 6px; }
-  p { color: #9aa1ad; font-size: 14.5px; line-height: 1.5; margin: 6px 0; }
-  a.boton { display: block; margin: 22px 0 18px; padding: 15px; border-radius: 14px; background: #c8102e; color: #fff;
-            font-weight: 700; font-size: 17px; text-decoration: none; }
-  .pasos { text-align: left; background: #1a1d23; border: 1px solid #2a2e36; border-radius: 14px; padding: 12px 16px; font-size: 14px; line-height: 1.6; }
-  .pasos b { color: #fff; }
+         background: #0e1014; color: #eceef2; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif; text-align: center; }
+  .caja { max-width: 360px; width: 100%; }
+  img { width: 96px; height: 96px; border-radius: 24px; box-shadow: 0 10px 34px rgba(0,0,0,.55); animation: latido 1.6s ease-in-out infinite; }
+  @keyframes latido { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+  h1 { font-size: 20px; margin: 18px 0 6px; }
+  p { color: #8b93a1; font-size: 14px; line-height: 1.5; }
+  .barra { width: 120px; height: 3px; border-radius: 3px; background: #262b34; margin: 22px auto 0; overflow: hidden; }
+  .barra::after { content: ""; display: block; width: 40%; height: 100%; background: #e11d48; border-radius: 3px; animation: va 1s ease-in-out infinite; }
+  @keyframes va { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+  button { margin-top: 16px; padding: 12px 20px; border-radius: 12px; border: 0; background: #e11d48; color: #fff; font-weight: 700; font-size: 15px; }
 </style>
 </head>
 <body>
 <div class="caja">
-  <img src="https://lh3.googleusercontent.com/d/1KREbmeflchSKmfAKPHcVAaz0-etsHKaa" alt="Ícono de Entregas">
+  <img src="https://lh3.googleusercontent.com/d/1KREbmeflchSKmfAKPHcVAaz0-etsHKaa" alt="">
   <h1>Estado de los autos · Jeep RAM</h1>
-  <p id="estado">Abriendo la app…</p>
-  <a class="boton" id="abrir" href="#">Abrir la app</a>
-  <div class="pasos" id="pasos">
-    <b>Para tenerla en el inicio con este ícono:</b><br>
-    📱 <b>Android (Chrome):</b> menú ⋮ → <b>Agregar a pantalla principal</b> (o "Instalar app").<br>
-    🍎 <b>iPhone (Safari):</b> botón compartir ⬆️ → <b>Agregar a inicio</b>.
-  </div>
+  <div id="cargando"><div class="barra"></div></div>
+  <div id="error" style="display:none"><p>No se pudo cargar. Revisá internet.</p><button onclick="location.reload()">Reintentar</button></div>
 </div>
 <script>
-  // Link compartido (solo lectura). Si un día cambia, solo hay que cambiarlo acá.
-  var APP = 'https://script.google.com/macros/s/AKfycbxLhhRuioH2srNX46XuOuEUUX4-hFNZ5iaZ33VEFnspKds7CZW_hPxdVH2LlVML0T5UPQ/exec';
-  var esPC = window.innerWidth >= 1000 && !/Android|iPhone|iPad/i.test(navigator.userAgent);
-  var destino = APP + '?vista=' + (esPC ? 'pc' : 'cel');
-  document.getElementById('abrir').href = destino;
-  // Si se abrió desde el ícono del inicio, entra directo a la app
-  var desdeInicio = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true ||
-                    /[?&]abrir=1/.test(location.search);
-  if (desdeInicio) { location.replace(destino); }
-  else { document.getElementById('estado').textContent = 'Agregá esta página a la pantalla de inicio de tu celular.'; }
+/* Link para compartir (solo ver). Muestra la pantalla de la app sin pasar por la página de Google,
+   así no aparece el cartel "Un usuario de Google Apps Script creó esta aplicación". */
+var API = 'https://script.google.com/macros/s/AKfycbwMccMP6rNIBN-iutoZVSfVqYasFBMve_L3eUG1JDRx5FhUtV1idSD72ImTmHms3ooa2w/exec';
+var LG = Storage.prototype.getItem, LS = Storage.prototype.setItem;   // originales (la pantalla después usa memoria aparte)
+function leer(k) { try { return LG.call(localStorage, k); } catch (e) { return null; } }
+function guardar(k, v) { try { LS.call(localStorage, k, v); } catch (e) {} }
+function pedir(fn, args) {
+  return fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ fn: fn, args: args || [] }) })
+    .then(function (r) { return r.json(); }).then(function (j) { if (!j.ok) throw new Error(j.e); return j.r; });
+}
+
+// Lo que corre dentro de la pantalla: solo puede leer el estado; lo demás no hace nada
+function puente() {
+  var API = window.__API;
+  // Memoria aparte (prefijo est_): si se abre en el celular del dueño, no pisa los datos guardados de su app
+  try { var P = Storage.prototype, g = P.getItem, s = P.setItem, r = P.removeItem;
+    P.getItem = function (k) { return g.call(this, 'est_' + k); };
+    P.setItem = function (k, v) { return s.call(this, 'est_' + k, v); };
+    P.removeItem = function (k) { return r.call(this, 'est_' + k); }; } catch (e) {}
+  function corredor(ok, mal) {
+    return new Proxy({}, { get: function (_, fn) {
+      if (fn === 'withSuccessHandler') return function (f) { return corredor(f, mal); };
+      if (fn === 'withFailureHandler') return function (f) { return corredor(ok, f); };
+      if (fn === 'withUserObject') return function () { return corredor(ok, mal); };
+      return function () {
+        if (fn !== 'getInicio' && fn !== 'getDatos') return;   // solo ver: nada se cambia
+        fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                     body: JSON.stringify({ fn: '_estado', args: [arguments[0] || ''] }) })
+          .then(function (r) { return r.json(); })
+          .then(function (j) { if (!j.ok) throw new Error(j.e); if (ok) ok(j.r); })
+          .catch(function (e) { if (mal) mal(e.message ? e : new Error('Sin conexión')); });
+      };
+    } });
+  }
+  window.google = { script: { run: corredor(), host: { close: function () {} },
+    url: { getLocation: function (cb) { cb({ parameter: { ver: '1' }, parameters: {}, hash: '' }); } } } };
+}
+
+function mostrar(html) {
+  if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', function () { mostrar(html); }); return; }
+  var extra = '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">' +
+    '<meta name="theme-color" content="#0e1014"><link rel="manifest" href="manifest.webmanifest">' +
+    '<link rel="apple-touch-icon" href="https://lh3.googleusercontent.com/d/1KREbmeflchSKmfAKPHcVAaz0-etsHKaa">' +
+    '<title>Estado de autos</title><script>window.__API=' + JSON.stringify(API) + ';(' + puente.toString() + ')();<\/script>';
+  html = html.replace(/<base[^>]*>/i, '').replace(/<head>/i, '<head>' + extra);
+  document.open(); document.write(html); document.close();
+}
+
+var guardada = leer('estadoHtml');
+if (guardada) {
+  mostrar(guardada);
+  pedir('_html').then(function (h) { guardar('estadoHtml', h); }, function () {});   // la próxima vez abre la más nueva
+} else {
+  pedir('_html').then(function (h) { guardar('estadoHtml', h); mostrar(h); }, function () {
+    document.getElementById('cargando').style.display = 'none'; document.getElementById('error').style.display = 'block';
+  });
+}
 </script>
 </body>
 </html>
