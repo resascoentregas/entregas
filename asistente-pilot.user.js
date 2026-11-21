@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Asistente Entregas → Pilot
 // @namespace    resascoentregas
-// @version      2.0
-// @description  Hace en Pilot los pasos de cada entrega que marcás en la app Entregas (pre-entrega, controles, planificar, entregado, transferir a Azul, etiqueta). Con Pilot abierto, lo hace solo cada 3 minutos.
+// @version      2.1
+// @description  Hace en Pilot los pasos de cada entrega que marcás en la app Entregas (pre-entrega, controles, planificar, entregado, transferir a Azul, etiqueta). Con Pilot abierto, lo hace solo cada 3 minutos, y te avisa en la app cuando un legajo pasa a "Ok para entrega" o alguien deja un comentario.
 // @match        https://app.pilotsolution.com.ar/*
 // @noframes
 // @grant        GM_xmlhttpRequest
@@ -160,7 +160,7 @@
       b.onclick = () => { history.replaceState(null, '', location.pathname + location.search); ok ? location.reload() : caja.remove(); }; caja.appendChild(b); };
     try {
       await pasos(t, W, paso, msg => confirm(msg));
-      await api('marcarPilot', [t.clave, 'asistente']); sacarEsperaVos(t); historial(t.cliente + ': ' + QUE[t.accion] + ' ✔');
+      await api('marcarPilot', [t.clave, 'asistente', t.cliente + ': ' + QUE[t.accion]]); sacarEsperaVos(t); historial(t.cliente + ': ' + QUE[t.accion] + ' ✔');
       fin(true, 'Todo hecho en Pilot');
     } catch (e) { fin(false, (e instanceof NecesitaVos ? 'Cancelado: ' : 'Se frenó: ') + e.message + '. Lo que ya se hizo quedó hecho; revisá el legajo.'); }
   }
@@ -263,7 +263,7 @@
     const hechos = [];
     try { await pasos(t, f.contentWindow, txt => hechos.push(txt), () => false); }
     finally { f.remove(); }
-    await api('marcarPilot', [t.clave, 'automático']);
+    await api('marcarPilot', [t.clave, 'automático', t.cliente + ': ' + QUE[t.accion]]);
     return hechos.filter(x => x[0] === '✔').length;
   }
   async function autoCiclo() {
@@ -285,11 +285,71 @@
     finally { estadoAuto = ''; pintarBtn(); if (panel.style.display === 'block') cargar(); }
   }
 
+  /* ---------- Vigía: avisa en la app (solo lee Pilot, no cambia nada) ----------
+     1) legajos que pasan a la etiqueta "Ok para entrega"
+     2) comentarios nuevos que deja otra persona en los legajos en preentrega, en entrega u "Ok para entrega" */
+  const ETIQUETA_OK = 4, YO = 'daniel diaz';
+  const limpio = s => String(s || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+  async function listaLegajos(filtro) {
+    const base = { status_filter: 'todos', business_type_filter: '', page: '', favorites: '', filter_seeker: '', filter_users_select: '',
+      context_users: '', label_filter: '', sort: '', order: '', current_user_id: W.gl_user_id || '' };
+    let filas = [], pag = 1, tot = 1;
+    do {
+      const r = await W.$.post('/adminfiles/services/adminfiles.list.php', Object.assign({}, base, filtro, { page: String(pag) }));
+      const d = (r && r.data) || {}; filas = filas.concat(d.dataRows || []); tot = +d.total_pages || 1; pag++;
+    } while (pag <= tot && pag <= 10);
+    return filas.map(f => ({ id: String(f.admin_file_id).replace(/\D/g, ''), cliente: nombreFila(f).replace(/\w/g, c => c.toUpperCase()),
+      modelo: limpio(f.unit_description), etiqueta: limpio(f.admin_file_label_color) }));
+  }
+  function comentarios(html) {
+    const d = new DOMParser().parseFromString('<div>' + html + '</div>', 'text/html');
+    return [...d.querySelectorAll('.todo-tasklist-item')].map(it => {
+      const tx = it.querySelector('.todo-tasklist-item-text'), cuerpo0 = it.querySelector('.pilot-event-list-item');
+      const tit = limpio(tx ? tx.textContent.replace(cuerpo0 ? cuerpo0.textContent : '', '') : '');
+      const cuerpo = it.querySelector('.pilot-event-list-item');
+      const ctl = it.querySelector('.todo-tasklist-controls');
+      return { tipo: tit, texto: cuerpo ? limpio(cuerpo.innerHTML.replace(/<br\s*\/?>/gi, ' · ')) : '',
+        cuando: ctl ? limpio((ctl.querySelector('.pull-left') || {}).textContent) : '', quien: ctl ? limpio((ctl.querySelector('.pull-right') || {}).textContent) : '' };
+    }).filter(e => /^comentario/i.test(e.tipo) && e.texto);
+  }
+  const fechaDe = s => { const m = String(s).match(/(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2})/); return m ? new Date(+m[3], m[2] - 1, +m[1], +m[4], +m[5]).getTime() : 0; };
+  async function vigilar() {
+    if (!cfg() || /\/login|logout/.test(location.pathname) || !W.$ || !W.gl_user_id) return;
+    if (Date.now() - GM_getValue('vigLock', 0) < 8 * 60000) return;   // otra pestaña de Pilot ya lo hizo hace poco
+    GM_setValue('vigLock', Date.now());
+    try {
+      const avisos = [], primera = !GM_getValue('vigInicio', 0);
+      // 1) Ok para entrega
+      const ok = await listaLegajos({ label_filter: String(ETIQUETA_OK) });
+      const okVistos = GM_getValue('okVistos', {}), okAhora = {};
+      ok.forEach(l => { okAhora[l.id] = 1; if (!primera && !okVistos[l.id]) avisos.push({ tipo: 'ok', id: 'ok|' + l.id + '|' + new Date().toDateString(), cliente: l.cliente, modelo: l.modelo }); });
+      // 2) Comentarios de otros en los legajos que estás trabajando
+      const mios = {}; ok.concat(await listaLegajos({ status_filter: String(ESTADO_PREENTREGA) }), await listaLegajos({ status_filter: '12' })).forEach(l => { if (!/^entregado$/i.test(l.etiqueta)) mios[l.id] = l; });   // los ya entregados no
+      const vistos = GM_getValue('notasVistas', {}), lim = Date.now() - 24 * 3600000;
+      for (const l of Object.values(mios)) {
+        const r = await W.$.post('/adminfileContext/services/get.events.list.php', { admin_file_id: l.id, page: 1, show_historical_events: false });
+        for (const c of comentarios((r && r.data) || '')) {
+          const k = l.id + '|' + c.cuando + '|' + c.texto.slice(0, 60);
+          if (vistos[k]) continue;
+          vistos[k] = Date.now();
+          if (norm(c.quien) === YO || (primera && fechaDe(c.cuando) < lim)) continue;   // lo tuyo no; la primera vez, solo lo de las últimas 24 h
+          avisos.push({ tipo: 'nota', id: 'nota|' + k, cliente: l.cliente, modelo: l.modelo, texto: c.texto, quien: c.quien });
+        }
+      }
+      if (avisos.length) await api('pilotAvisos', [avisos]);
+      GM_setValue('okVistos', okAhora);
+      const corte = Date.now() - 30 * 86400000; Object.keys(vistos).forEach(k => { if (vistos[k] < corte) delete vistos[k]; });
+      GM_setValue('notasVistas', vistos); GM_setValue('vigInicio', Date.now());
+      if (avisos.length) historial('🔔 ' + avisos.length + ' aviso' + (avisos.length > 1 ? 's' : '') + ' de Pilot enviado' + (avisos.length > 1 ? 's' : '') + ' a la app');
+    } catch (e) { GM_setValue('vigLock', 0); /* reintenta en el próximo ciclo */ }
+  }
+
   /* ---------- Arranque ---------- */
   const latir = () => api('pilotLatido').catch(() => {});   // la app muestra "● Pilot" en verde mientras esto llegue
   if (cfg() && !/login/.test(location.host + location.pathname)) {
     api('getPilotPendientes').then(l => { lista = l; pintarBtn(); }).catch(() => {});
     latir(); setInterval(latir, 120000);
     setTimeout(autoCiclo, 20000); setInterval(autoCiclo, CADA);
+    setTimeout(vigilar, 40000); setInterval(vigilar, 10 * 60000);   // avisos de Pilot a la app, cada 10 minutos
   }
 })();
