@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente Entregas → Pilot
 // @namespace    resascoentregas
-// @version      1.0
+// @version      1.1
 // @description  Hace en Pilot los pasos de cada entrega que marcás en la app Entregas (pre-entrega, controles, planificar, entregado, transferir a Azul, etiqueta).
 // @match        https://app.pilotsolution.com.ar/*
 // @grant        GM_xmlhttpRequest
@@ -105,14 +105,31 @@
   /* ---------- 1) Buscar el legajo por VIN y abrirlo ---------- */
   async function abrirLegajo(t) {
     panel.innerHTML = '<h3>🚗 Buscando el legajo de ' + t.cliente + '…</h3>';
-    const r = await W.$.post('/adminfiles/services/adminfiles.list.php', { status_filter: 'todos', business_type_filter: '1', page: '', favorites: '',
-      filter_seeker: t.vin.slice(-8), filter_users_select: '', context_users: '', label_filter: '', sort: '', order: '', current_user_id: W.gl_user_id || '' });
-    const filas = (r && r.data && r.data.dataRows) || [];
-    if (filas.length !== 1) { panel.innerHTML = '<h3>🚗 Asistente Entregas</h3><small>' + (filas.length ? 'Encontré ' + filas.length + ' legajos con ese VIN; abrilo a mano.' : 'No encontré un legajo con el VIN …' + t.vin.slice(-8) + '.') + '</small>'; return; }
-    const guid = (String(filas[0].customer_rsocial).match(/open\('([0-9A-F-]{36})'\)/i) || [])[1];
-    if (!guid) { panel.innerHTML = '<small>No pude abrir el legajo.</small>'; return; }
-    GM_setValue('tarea', Object.assign({}, t, { adminFileId: String(filas[0].admin_file_id).replace(/\D/g, ''), estadoPilot: norm(String(filas[0].admin_file_status).replace(/<[^>]+>/g, '')) }));
-    location.href = '/adminfileContext/index.php?guid=' + guid + '#asistente';
+    const buscar = async s => { const r = await W.$.post('/adminfiles/services/adminfiles.list.php', { status_filter: 'todos', business_type_filter: '', page: '', favorites: '',
+      filter_seeker: s, filter_users_select: '', context_users: '', label_filter: '', sort: '', order: '', current_user_id: W.gl_user_id || '' });
+      return (r && r.data && r.data.dataRows) || []; };
+    const nombre = f => norm(String(f.customer_rsocial).replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\d+\s*$/, ''));
+    // 1) Por el Cód. Referencia (suele tener el final del VIN)
+    let filas = [];
+    for (const s of [t.vin.slice(-8), t.vin.slice(-6), t.vin.slice(-5)]) { filas = await buscar(s); if (filas.length) break; }
+    // 2) Si no, por el nombre del cliente (en cualquier orden: "HUMAN LAURA" = "laura human")
+    if (!filas.length) {
+      const pal = norm(t.cliente).replace(/[.,]/g, ' ').split(' ').filter(p => p.length > 2 && !/^(srl|sa|sas|s\.?r\.?l)$/.test(p));
+      const larga = pal.slice().sort((a, b) => b.length - a.length)[0] || norm(t.cliente);
+      filas = (await buscar(larga)).filter(f => { const n = nombre(f); return pal.filter(p => n.indexOf(p) >= 0).length >= Math.min(2, pal.length); });
+    }
+    if (!filas.length) { panel.innerHTML = '<h3>🚗 Asistente Entregas</h3><small>No encontré el legajo de ' + t.cliente + ' (VIN …' + t.vin.slice(-8) + '). Abrilo a mano.</small>'; return; }
+    const ir = f => {
+      const guid = (String(f.customer_rsocial).match(/open\('([0-9A-F-]{36})'\)/i) || [])[1];
+      if (!guid) { panel.innerHTML = '<small>No pude abrir el legajo.</small>'; return; }
+      GM_setValue('tarea', Object.assign({}, t, { adminFileId: String(f.admin_file_id).replace(/\D/g, ''), estadoPilot: norm(String(f.admin_file_status).replace(/<[^>]+>/g, '')) }));
+      location.href = '/adminfileContext/index.php?guid=' + guid + '#asistente';
+    };
+    if (filas.length === 1) return ir(filas[0]);
+    // Varios legajos posibles: que elija él (igual se controla el VIN adentro del legajo)
+    panel.innerHTML = '<h3>🚗 ¿Cuál es el legajo de ' + t.cliente + '?</h3>' + filas.map((f, i) =>
+      `<div class="it"><b>${nombre(f)}</b><small>Legajo #${String(f.admin_file_id).replace(/\D/g, '')} · ${String(f.unit_description || '').replace(/<[^>]+>/g, ' ')}</small><button class="h" data-leg="${i}">Este</button></div>`).join('');
+    panel.querySelectorAll('[data-leg]').forEach(b => b.onclick = e => { e.stopPropagation(); ir(filas[+b.dataset.leg]); });
   }
 
   /* ---------- 2) Ya en el legajo: hacer los pasos ---------- */
@@ -128,9 +145,13 @@
       b.onclick = () => { history.replaceState(null, '', location.pathname + location.search); ok ? location.reload() : caja.remove(); }; caja.appendChild(b); };
     try {
       // Esperar a que Pilot termine de cargar tareas y unidad
-      for (let i = 0; i < 40 && !(document.querySelector('[id^="chk_tarea_"]') && document.querySelector('#stockVin')); i++) await esperar(500);
+      const sinUnidad = () => /SIN UNIDAD/i.test((document.getElementById('entregas') || {}).innerText || '');
+      for (let i = 0; i < 40 && !(document.querySelector('[id^="chk_tarea_"]') && (document.querySelector('#stockVin') || sinUnidad())); i++) await esperar(500);
       const vinPilot = (W.$('#stockVin').attr('data-value') || '').toUpperCase();
-      if (vinPilot !== t.vin.toUpperCase()) return fin(false, 'El VIN del legajo (' + (vinPilot || 'sin VIN') + ') no coincide con ' + t.vin + '. No toqué nada.');
+      if (!vinPilot) {
+        if (!confirm('Este legajo todavía no tiene la unidad (VIN) asignada en Pilot.\n\n¿Es el legajo de ' + t.cliente + '? Si confirmás, sigo igual.')) return fin(false, 'Cancelado: el legajo no tiene VIN para controlar.');
+        paso('• El legajo no tiene unidad asignada: seguí porque confirmaste que es de ' + t.cliente);
+      } else if (vinPilot !== t.vin.toUpperCase()) return fin(false, 'El VIN del legajo (' + vinPilot + ') no coincide con ' + t.vin + '. No toqué nada.');
       const id = t.adminFileId, sale = W.getSaleId ? W.getSaleId() : W.$('#sale_id').val();
       const textoEntregas = norm((document.getElementById('entregas') || document.body).innerText);
 
