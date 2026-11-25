@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente Entregas → Pilot
 // @namespace    resascoentregas
-// @version      2.9
+// @version      3.0
 // @description  Hace en Pilot los pasos de cada entrega que marcás en la app Entregas (pre-entrega, controles, planificar, entregado, transferir a Azul, etiqueta). Con Pilot abierto, lo hace al instante (se fija cada 3 segundos si marcaste algo), y te avisa en la app cuando un legajo pasa a "Ok para entrega" o alguien deja un comentario.
 // @match        https://app.pilotsolution.com.ar/*
 // @noframes
@@ -24,7 +24,7 @@
   const YA_EN_PREENTREGA = ['en preentrega', 'en entrega', 'cierre de legajo'];
   const CADA = 60000;   // revisión completa de respaldo, cada 1 minuto
   const RAPIDO = 3000;  // cada 3 segundos pregunta si marcaste algo en la app (es instantáneo)
-  const VER = '2.9', MAX_INTENTOS = 5;
+  const VER = '3.0', MAX_INTENTOS = 5;
   let corriendo = false;   // no arranca otra vuelta mientras termina la anterior
 
   /* ---------- Conexión con la app Entregas ---------- */
@@ -128,7 +128,7 @@
   function pintarPanel(cargando) {
     const ev = esperanVos(), nTrab = lista.filter(t => trabado(ev[t.clave])).length, e = GM_getValue('estado', null), on = autoOn();
     const item = (t, i) => { const x = ev[t.clave];
-      return `<div class="fila ${trabado(x) ? 'av' : ''}" title="${esc((t.modelo || '') + ' · VIN ' + t.vin)}"><div class="tx"><b>${esc(t.cliente)}</b><small>${CORTO[t.accion] || esc(t.accion)}${t.fecha ? ' · ' + esc(t.fecha) : ''}</small>` +
+      return `<div class="fila ${trabado(x) ? 'av' : ''}" title="${esc((t.modelo || '') + ' · VIN ' + t.vin)}"><div class="tx"><b>${esc(t.cliente)}</b><small>${t.cambio ? 'Reprogramar entrega' : CORTO[t.accion] || esc(t.accion)}${t.fecha ? ' · ' + esc(t.fecha) : ''}</small>` +
         (x ? `<em>${trabado(x) ? '⚠ ' : '↻ '}${esc(x.motivo)}</em>` : '') + `</div><div class="ac"><button class="h" data-i="${i}">Hacer</button><button class="s" data-x="${i}">ya está</button></div></div>`; };
     const hist = GM_getValue('historial', []);
     const sub = e && e.mal ? '⚠ ' + esc(e.txt) : cargando && !lista.length ? 'Buscando…' : !lista.length ? 'Al día con la app ✓' :
@@ -288,13 +288,14 @@
       }
     }
     if (t.accion === 'cita') {
-      if (yaHecho('plan') || textoEntregas.indexOf('no hay planificacion de entrega') < 0) paso('• Ya había una entrega planificada: si cambió la fecha, cambiala a mano en Planificar');
+      const yaPlan = textoEntregas.indexOf('no hay planificacion de entrega') < 0;   // 3.0: si en la app cambiaste el día u hora (t.cambio), se reprograma en Pilot
+      if (yaHecho('plan') || (yaPlan && !t.cambio)) paso('• Ya había una entrega planificada')
       else {
         const h = await horarioPilot(t.fecha, t.hora);
         const dd = { sale_id: sale, sale_admin_id: $('#sale_admin_id').val(), sale_delivery_rep_id: DANIEL, sale_delivered_branch_id: CASA_CENTRAL,
           sale_approximate_delivery_last_time: h, sale_approximate_delivery_last_date: dmyGuion(t.fecha) };
         if ($('#sale_rep_id').val()) dd.sale_rep_id = $('#sale_rep_id').val();
-        await post('/adminfileContext/services/schedule.delivery.php', dd); hecho('plan'); paso('✔ Planificada: ' + t.fecha + ' ' + h.slice(0, 2) + ':' + h.slice(2) + ' · Daniel Diaz · Casa Central');
+        await post('/adminfileContext/services/schedule.delivery.php', dd); hecho('plan'); paso((yaPlan ? '✔ Reprogramada: ' : '✔ Planificada: ') + t.fecha + ' ' + h.slice(0, 2) + ':' + h.slice(2) + ' · Daniel Diaz · Casa Central');
       }
       await cerrarTarea('Agendar cita para retirar la unidad');
     }
