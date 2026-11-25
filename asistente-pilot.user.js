@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Asistente Entregas → Pilot
 // @namespace    resascoentregas
-// @version      2.2
-// @description  Hace en Pilot los pasos de cada entrega que marcás en la app Entregas (pre-entrega, controles, planificar, entregado, transferir a Azul, etiqueta). Con Pilot abierto, lo hace solo cada 3 minutos, y te avisa en la app cuando un legajo pasa a "Ok para entrega" o alguien deja un comentario.
+// @version      2.9
+// @description  Hace en Pilot los pasos de cada entrega que marcás en la app Entregas (pre-entrega, controles, planificar, entregado, transferir a Azul, etiqueta). Con Pilot abierto, lo hace al instante (se fija cada 3 segundos si marcaste algo), y te avisa en la app cuando un legajo pasa a "Ok para entrega" o alguien deja un comentario.
 // @match        https://app.pilotsolution.com.ar/*
 // @noframes
 // @grant        GM_xmlhttpRequest
@@ -22,7 +22,10 @@
   const DANIEL = 88999, AZUL = 93885, CASA_CENTRAL = 1;
   const ESTADO_PREENTREGA = 5, ETIQUETA_ENTREGADO = 7, CONTROL_PRE_OK = 1;
   const YA_EN_PREENTREGA = ['en preentrega', 'en entrega', 'cierre de legajo'];
-  const CADA = 3 * 60000;   // modo automático: cada 3 minutos
+  const CADA = 60000;   // revisión completa de respaldo, cada 1 minuto
+  const RAPIDO = 3000;  // cada 3 segundos pregunta si marcaste algo en la app (es instantáneo)
+  const VER = '2.9', MAX_INTENTOS = 5;
+  let corriendo = false;   // no arranca otra vuelta mientras termina la anterior
 
   /* ---------- Conexión con la app Entregas ---------- */
   const cfg = () => GM_getValue('cfg', null);
@@ -52,45 +55,96 @@
     entregado: 'Entregado → transferir a Azul + etiqueta Entregado'
   };
   const detalle = t => QUE[t.accion] + (t.fecha ? ' · ' + t.fecha : '') + (t.hora ? ' ' + t.hora : '');
-  const autoOn = () => GM_getValue('auto', false);
-  const esperanVos = () => GM_getValue('esperanVos', {});   // clave → motivo (lo que el automático no hizo solo)
-  function marcarEsperaVos(t, motivo) { const e = esperanVos(); e[t.clave] = motivo; GM_setValue('esperanVos', e); }
-  function sacarEsperaVos(t) { const e = esperanVos(); delete e[t.clave]; GM_setValue('esperanVos', e); }
-  function historial(txt) { const h = GM_getValue('historial', []); h.unshift(new Date().toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' · ' + txt); GM_setValue('historial', h.slice(0, 20)); }
+  const autoOn = () => GM_getValue('auto29', true);   // prendido de entrada
+  if (!GM_getValue('v29', false)) { GM_setValue('esperanVos', {}); GM_setValue('v29', true); }   // al actualizar: todo lo frenado se reintenta
+  // clave → { motivo, espera (necesita que lo confirmes con "Hacer"), n (intentos), t }
+  const esperanVos = () => { const e = GM_getValue('esperanVos', {}); Object.keys(e).forEach(k => { if (typeof e[k] === 'string') e[k] = { motivo: e[k], espera: true, n: 1, t: 0 }; }); return e; };
+  function marcarEsperaVos(t, motivo, espera) { const e = esperanVos(), x = e[t.clave] || { n: 0 }; e[t.clave] = { motivo: motivo, espera: !!espera, n: x.n + 1, t: Date.now() }; GM_setValue('esperanVos', e); }
+  const trabado = x => !!x && (x.espera || x.n >= MAX_INTENTOS);
+  // Pasos ya hechos de cada pedido: si algo se corta a mitad de camino, al reintentar no se repite lo hecho
+  const prog = clave => (GM_getValue('prog', {})[clave] || {});
+  function anotarProg(clave, p) { const g = GM_getValue('prog', {}); (g[clave] = g[clave] || {})[p] = Date.now(); GM_setValue('prog', g); }
+  function sacarEsperaVos(t) { const e = esperanVos(); delete e[t.clave]; GM_setValue('esperanVos', e); const g = GM_getValue('prog', {}); delete g[t.clave]; GM_setValue('prog', g); }
+  function historial(txt) { const h = GM_getValue('historial', []); h.unshift(new Date().toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }) + ' · ' + txt); GM_setValue('historial', h.slice(0, 20)); }
   class NecesitaVos extends Error {}
+  const hora = () => new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
+  function estado(txt, mal) { GM_setValue('estado', { t: hora(), txt, mal: !!mal }); }
 
-  /* ---------- Panel ---------- */
+  /* ---------- Panel (2.9: minimalista, abre al instante con lo último que se sabe) ---------- */
+  const CORTO = { preentrega: 'Pasar a pre-entrega', preok: 'Pre-entrega OK', cita: 'Planificar entrega', entregado: 'Entrega realizada' };
   const css = document.createElement('style');
   css.textContent = `
-  #ae-btn{position:fixed;right:18px;bottom:18px;z-index:99999;background:#e11d48;color:#fff;border:0;border-radius:999px;padding:12px 18px;font:700 14px system-ui,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.3);cursor:pointer}
-  #ae-btn i{display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:7px;vertical-align:1px}
-  #ae-btn.off i{background:#9ca3af}
-  #ae-panel{position:fixed;right:18px;bottom:74px;z-index:99999;width:390px;max-height:72vh;overflow:auto;background:#14171c;color:#eceef2;border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.45);font:14px system-ui,sans-serif;padding:14px;display:none}
-  #ae-panel h3{margin:0 0 10px;font-size:15px}
-  #ae-panel h4{margin:14px 0 6px;font-size:12px;color:#8b93a1;text-transform:uppercase;letter-spacing:.05em}
-  #ae-panel .it{background:#1e222a;border:1px solid #2a2f39;border-radius:12px;padding:10px 12px;margin-bottom:8px}
-  #ae-panel .it.av{border-color:#b45309}
-  #ae-panel .it b{display:block}#ae-panel .it small{color:#8b93a1;display:block;margin:2px 0 8px}
-  #ae-panel .it .mv{color:#fbbf24}
-  #ae-panel button.h{background:#e11d48;color:#fff;border:0;border-radius:9px;padding:7px 12px;font-weight:700;cursor:pointer;margin-right:6px}
-  #ae-panel button.s{background:none;color:#8b93a1;border:1px solid #2a2f39;border-radius:9px;padding:7px 10px;cursor:pointer}
-  #ae-panel input[type=text]{width:100%;box-sizing:border-box;padding:9px;border-radius:9px;border:1px solid #2a2f39;background:#0e1014;color:#eceef2;margin:6px 0}
-  #ae-panel .auto{display:flex;align-items:center;gap:8px;background:#1e222a;border-radius:12px;padding:9px 12px;margin-bottom:10px;cursor:pointer}
-  #ae-panel .hist{color:#8b93a1;font-size:12px;line-height:1.6}
-  #ae-log{position:fixed;left:50%;top:80px;transform:translateX(-50%);z-index:100000;width:440px;background:#14171c;color:#eceef2;border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.5);font:14px system-ui,sans-serif;padding:16px 18px}
-  #ae-log li{margin:4px 0}#ae-log button{margin-top:10px;background:#e11d48;color:#fff;border:0;border-radius:9px;padding:8px 14px;font-weight:700;cursor:pointer}`;
+  #ae-btn{position:fixed;right:16px;bottom:16px;z-index:99999;display:flex;align-items:center;gap:7px;background:#fff;color:#111827;border:1px solid #e5e7eb;border-radius:999px;padding:8px 13px;font:600 13px system-ui,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.12);cursor:pointer}
+  #ae-btn i{width:8px;height:8px;border-radius:50%;background:#22c55e}
+  #ae-btn.pend i{background:#f59e0b}#ae-btn.trab i{background:#ef4444}#ae-btn.off i{background:#9ca3af}
+  #ae-btn.hace i{background:#3b82f6;animation:aeLat 1s infinite}@keyframes aeLat{50%{opacity:.3}}
+  #ae-btn b{background:#111827;color:#fff;border-radius:999px;font-size:11px;min-width:18px;height:18px;line-height:18px;text-align:center;padding:0 5px}
+  #ae-panel{position:fixed;right:16px;bottom:60px;z-index:99999;width:330px;max-height:70vh;overflow:auto;background:#fff;color:#111827;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.15);font:13.5px/1.35 system-ui,sans-serif;display:none}
+  #ae-panel .cab{display:flex;align-items:center;justify-content:space-between;padding:12px 14px 2px}
+  #ae-panel .cab b{font-size:14.5px}
+  #ae-panel .sub{padding:0 14px 10px;color:#6b7280;font-size:12.5px;border-bottom:1px solid #f1f2f4}
+  #ae-panel .sub.ok{color:#16a34a}#ae-panel .sub.mal{color:#dc2626}
+  #ae-panel .sw{display:flex;align-items:center;gap:6px;color:#6b7280;font-size:12px;cursor:pointer}
+  #ae-panel .sw input{display:none}
+  #ae-panel .sw span{width:30px;height:17px;border-radius:9px;background:#d1d5db;position:relative;transition:.2s}
+  #ae-panel .sw span:after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:#fff;transition:.2s}
+  #ae-panel .sw input:checked+span{background:#22c55e}#ae-panel .sw input:checked+span:after{left:15px}
+  #ae-panel .fila{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid #f1f2f4}
+  #ae-panel .fila .tx{flex:1;min-width:0}
+  #ae-panel .fila .tx b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+  #ae-panel .fila .tx small{color:#6b7280;font-size:12px}
+  #ae-panel .fila .tx em{display:block;font-style:normal;font-size:11.5px;color:#d97706;margin-top:1px}
+  #ae-panel .fila.av .tx em{color:#dc2626}
+  #ae-panel .ac{display:flex;flex-direction:column;align-items:flex-end;gap:3px}
+  #ae-panel button.h{background:#111827;color:#fff;border:0;border-radius:8px;padding:5px 11px;font:600 12px system-ui,sans-serif;cursor:pointer}
+  #ae-panel button.s{background:none;border:0;color:#9ca3af;font:11px system-ui,sans-serif;cursor:pointer;padding:0}
+  #ae-panel .lnk{display:flex;gap:14px;padding:8px 14px;border-bottom:1px solid #f1f2f4}
+  #ae-panel .lnk button{background:none;border:0;color:#2563eb;font:600 12px system-ui,sans-serif;cursor:pointer;padding:0}
+  #ae-panel .nada{padding:22px 14px;text-align:center;color:#16a34a;font-weight:600}
+  #ae-panel details{padding:8px 14px 12px;color:#6b7280;font-size:12px}
+  #ae-panel summary{cursor:pointer;list-style:none}
+  #ae-panel .hist{line-height:1.7;margin-top:4px}
+  #ae-panel .hd{padding:12px 14px;border-bottom:1px solid #f1f2f4}#ae-panel .est{color:#6b7280;font-size:12.5px;margin-top:3px}#ae-panel .est.mal{color:#dc2626}
+  #ae-panel .bd{padding:10px 14px 14px}#ae-panel .it{border-bottom:1px solid #f1f2f4;padding:8px 0}#ae-panel .cl{font-weight:600}#ae-panel .md{color:#6b7280;font-size:12px}#ae-panel .bt{margin-top:6px}
+  #ae-panel input[type=text]{width:100%;box-sizing:border-box;padding:8px;border-radius:8px;border:1px solid #e5e7eb;margin:6px 0}
+  #ae-log{position:fixed;left:50%;top:80px;transform:translateX(-50%);z-index:100000;width:400px;background:#fff;color:#111827;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.18);font:13.5px system-ui,sans-serif;padding:14px 16px}
+  #ae-log li{margin:3px 0}#ae-log button{margin-top:10px;background:#111827;color:#fff;border:0;border-radius:8px;padding:7px 13px;font-weight:600;cursor:pointer}`;
   document.head.appendChild(css);
   const btn = document.createElement('button'); btn.id = 'ae-btn';
   const panel = document.createElement('div'); panel.id = 'ae-panel';
   document.body.appendChild(btn); document.body.appendChild(panel);
-  let lista = [], estadoAuto = '';
-  const pintarBtn = () => { btn.className = autoOn() ? '' : 'off'; btn.innerHTML = '<i></i>Entregas' + (lista.length ? ' (' + lista.length + ')' : '') + (estadoAuto ? ' · ' + estadoAuto : ''); };
+  let lista = GM_getValue('listaCache', []), estadoAuto = '', listaOk = false;   // solo se reporta a la app con su lista ya leída
+  const guardarLista = l => { lista = l || []; listaOk = true; GM_setValue('listaCache', lista); };
+  const esc = s => String(s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const pintarBtn = () => {
+    const ev = esperanVos(), nTrab = lista.filter(t => trabado(ev[t.clave])).length;
+    btn.className = !autoOn() ? 'off' : estadoAuto ? 'hace' : nTrab ? 'trab' : lista.length ? 'pend' : '';
+    btn.innerHTML = '<i></i>' + esc(estadoAuto || 'Pilot') + (lista.length ? '<b>' + lista.length + '</b>' : '');
+    btn.title = !autoOn() ? 'Automático apagado: tocá para prenderlo' : nTrab ? nTrab + ' necesitan que toques "Hacer"' : lista.length ? 'Pendientes: se hacen solos' : 'Pilot al día con la app';
+  };
   pintarBtn();
-  btn.onclick = () => { panel.style.display = panel.style.display === 'block' ? 'none' : 'block'; if (panel.style.display === 'block') cargar(); };
+  btn.onclick = () => { const ver = panel.style.display !== 'block'; panel.style.display = ver ? 'block' : 'none'; if (ver) cargar(); };
 
+  function pintarPanel(cargando) {
+    const ev = esperanVos(), nTrab = lista.filter(t => trabado(ev[t.clave])).length, e = GM_getValue('estado', null), on = autoOn();
+    const item = (t, i) => { const x = ev[t.clave];
+      return `<div class="fila ${trabado(x) ? 'av' : ''}" title="${esc((t.modelo || '') + ' · VIN ' + t.vin)}"><div class="tx"><b>${esc(t.cliente)}</b><small>${CORTO[t.accion] || esc(t.accion)}${t.fecha ? ' · ' + esc(t.fecha) : ''}</small>` +
+        (x ? `<em>${trabado(x) ? '⚠ ' : '↻ '}${esc(x.motivo)}</em>` : '') + `</div><div class="ac"><button class="h" data-i="${i}">Hacer</button><button class="s" data-x="${i}">ya está</button></div></div>`; };
+    const hist = GM_getValue('historial', []);
+    const sub = e && e.mal ? '⚠ ' + esc(e.txt) : cargando && !lista.length ? 'Buscando…' : !lista.length ? 'Al día con la app ✓' :
+      lista.length + ' pendiente' + (lista.length > 1 ? 's' : '') + (nTrab ? ' · ' + nTrab + ' necesita' + (nTrab > 1 ? 'n' : '') + ' tu ok' : on ? ' · se hacen solos' : '');
+    panel.innerHTML = `<div class="cab"><b>Entregas → Pilot</b><label class="sw" title="Con Pilot abierto, hace solo lo que marcás en la app">Auto<input type="checkbox" id="ae-auto" ${on ? 'checked' : ''}><span></span></label></div>` +
+      `<div class="sub ${e && e.mal ? 'mal' : lista.length ? '' : 'ok'}">${sub}${cargando && lista.length ? ' · actualizando…' : ''}</div>` +
+      `<div class="lnk"><button id="ae-ya">↻ Revisar ahora</button>${nTrab ? '<button id="ae-reint">Reintentar frenados</button>' : ''}</div>` +
+      (lista.length ? lista.map(item).join('') : cargando ? '' : '<div class="nada">Nada pendiente 👍</div>') +
+      (hist.length ? '<details><summary>Últimos movimientos ›</summary><div class="hist">' + hist.slice(0, 8).map(esc).join('<br>') + '</div></details>' : '');
+    panel.querySelector('#ae-auto').onchange = x => { GM_setValue('auto29', x.target.checked); pintarBtn(); pintarPanel(); reportar(); if (x.target.checked) setTimeout(autoCiclo, 500); };
+    panel.querySelector('#ae-ya').onclick = () => { GM_setValue('autoLock', 0); estado('Revisando…'); pintarPanel(true); setTimeout(autoCiclo, 200); };
+    const ri = panel.querySelector('#ae-reint'); if (ri) ri.onclick = () => { GM_setValue('esperanVos', {}); GM_setValue('autoLock', 0); estado('Reintentando…'); pintarPanel(true); setTimeout(autoCiclo, 300); };
+  }
   async function cargar() {
     if (!cfg()) {
-      panel.innerHTML = '<h3>🚗 Asistente Entregas</h3><small>Pegá el código de acceso de la app (el del mail "Clave de la app Entregas"):</small><input type="text" id="ae-cod" placeholder="Código de acceso"><button class="h" id="ae-ok">Guardar</button>';
+      panel.innerHTML = '<div class="hd"><b>Asistente Entregas</b><div class="est">Pegá el código de acceso de la app Entregas:</div><input type="text" id="ae-cod" placeholder="Código de acceso"><button class="h" id="ae-ok">Conectar</button></div>';
       panel.querySelector('#ae-ok').onclick = () => {
         const v = panel.querySelector('#ae-cod').value.trim().replace(/^.*#c=/, ''), p = v.split('.');
         if (p.length !== 2 || p[0].length < 20 || p[1].length < 20) return alert('Ese código no parece correcto');
@@ -98,23 +152,17 @@
       };
       return;
     }
-    panel.innerHTML = '<h3>🚗 Para hacer en Pilot</h3><small>Buscando…</small>';
-    try { lista = await api('getPilotPendientes'); } catch (e) { panel.innerHTML = '<h3>🚗 Asistente Entregas</h3><small>No pude leer la app: ' + e.message + '</small>'; return; }
-    pintarBtn();
-    const ev = esperanVos();
-    const item = (t, i) => `<div class="it ${ev[t.clave] ? 'av' : ''}"><b>${t.cliente}</b><small>${t.modelo || ''} · VIN …${t.vin.slice(-8)}<br>➜ ${detalle(t)}${ev[t.clave] ? '<br><span class="mv">⚠ ' + ev[t.clave] + '</span>' : ''}</small>
-       <button class="h" data-i="${i}">Hacer</button><button class="s" data-x="${i}">Ya está hecho</button></div>`;
-    const hist = GM_getValue('historial', []);
-    panel.innerHTML = '<h3>🚗 Para hacer en Pilot' + (lista.length ? ' (' + lista.length + ')' : '') + '</h3>' +
-      `<label class="auto"><input type="checkbox" id="ae-auto" ${autoOn() ? 'checked' : ''}> <span><b>Modo automático</b><br><small style="color:#8b93a1">Con Pilot abierto, hace solo los pendientes cada 3 minutos</small></span></label>` +
-      (lista.length ? lista.map(item).join('') : '<small>Nada pendiente 👍</small>') +
-      (hist.length ? '<h4>Últimos movimientos</h4><div class="hist">' + hist.slice(0, 8).join('<br>') + '</div>' : '');
-    panel.querySelector('#ae-auto').onchange = e => { GM_setValue('auto', e.target.checked); pintarBtn(); if (e.target.checked) setTimeout(autoCiclo, 1000); };
+    pintarPanel(true);   // al instante, con lo último que se sabe
+    try { guardarLista(await api('getPilotPendientes')); }
+    catch (e) { estado('No pude leer la app: ' + e.message, true);
+      panel.innerHTML = '<div class="hd"><b>Asistente Entregas</b><div class="est mal">⚠ No pude leer la app: ' + esc(e.message) + '</div></div><div class="bd"><small>Si dice "Clave incorrecta", borrá el código y cargalo de nuevo.</small><div class="bt"><button class="h" id="ae-borrar">Borrar código de acceso</button></div></div>';
+      panel.querySelector('#ae-borrar').onclick = () => { GM_deleteValue('cfg'); cargar(); }; return; }
+    pintarBtn(); if (panel.style.display === 'block') pintarPanel();
   }
   panel.addEventListener('click', async e => {
     const h = e.target.closest('[data-i]'), x = e.target.closest('[data-x]');
     if (x) { const t = lista[+x.dataset.x]; if (!confirm('¿Marcar como hecho sin tocar Pilot?\n\n' + t.cliente + ' – ' + detalle(t))) return;
-      await api('marcarPilot', [t.clave, 'marcado a mano']); sacarEsperaVos(t); historial(t.cliente + ': marcado a mano'); cargar(); }
+      await api('marcarPilot', [t.clave, 'marcado a mano']); sacarEsperaVos(t); historial(t.cliente + ': marcado a mano'); lista = lista.filter(z => z.clave !== t.clave); GM_setValue('listaCache', lista); pintarPanel(); pintarBtn(); reportar(); }
     if (h) abrirLegajo(lista[+h.dataset.i]);
   });
 
@@ -126,11 +174,29 @@
     let filas = [];
     for (const s of [t.vin.slice(-8), t.vin.slice(-6), t.vin.slice(-5)]) { filas = await buscar(s); if (filas.length) break; }
     if (!filas.length) {
-      const pal = norm(t.cliente).replace(/[.,]/g, ' ').split(' ').filter(p => p.length > 2 && !/^(srl|sa|sas)$/.test(p));
-      const larga = pal.slice().sort((a, b) => b.length - a.length)[0] || norm(t.cliente);
-      filas = (await buscar(larga)).filter(f => { const n = nombreFila(f); return pal.filter(p => n.indexOf(p) >= 0).length >= Math.min(2, pal.length); });
+      // Por nombre: sirve con el nombre corto ("Crivani"), completo ("Crivani Victor Ramon") o al revés ("Victor Crivani")
+      const pal = palabras(t.cliente).sort((a, b) => b.length - a.length);
+      const vistos = {};
+      for (const p of pal.slice(0, 3)) {   // prueba con las palabras más largas, una por una
+        for (const f of await buscar(p)) { const id = datosFila(f).adminFileId; if (!vistos[id] && mismoNombre(t.cliente, nombreFila(f))) { vistos[id] = 1; filas.push(f); } }
+        if (filas.length) break;
+      }
+    }
+    if (filas.length > 1) {   // varios: quedarse con los que muestran este VIN (su final) en la unidad
+      const v8 = t.vin.slice(-8).toUpperCase(), conVin = filas.filter(f => String(f.unit_description || '').toUpperCase().indexOf(v8) >= 0);
+      if (conVin.length) filas = conVin;
     }
     return filas;
+  }
+  // Palabras de un nombre, sin comas, sin SRL/SA y sin palabras de 1-2 letras
+  const palabras = s => norm(s).replace(/[.,;()]/g, ' ').split(' ').filter(p => p.length > 2 && !/^(srl|sa|sas|sociedad|anonima)$/.test(p));
+  // Mismo nombre aunque esté al revés o uno sea más corto: todas las palabras del nombre corto están en el largo (o coinciden 2 o más).
+  // También acepta abreviaturas de 4+ letras ("Alej" = "Alejandro").
+  function mismoNombre(a, b) {
+    const A = palabras(a), B = palabras(b); if (!A.length || !B.length) return false;
+    const igual = (p, q) => p === q || (p.length >= 4 && q.length >= 4 && (p.indexOf(q) === 0 || q.indexOf(p) === 0));
+    const com = A.filter(p => B.some(q => igual(p, q))).length;
+    return com >= 2 || com === Math.min(A.length, B.length);
   }
   const nombreFila = f => norm(String(f.customer_rsocial).replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\d+\s*$/, ''));
   const guidFila = f => (String(f.customer_rsocial).match(/open\('([0-9A-F-]{36})'\)/i) || [])[1];
@@ -138,14 +204,14 @@
 
   /* ---------- Manual: botón "Hacer" (abre el legajo y lo hace a la vista) ---------- */
   async function abrirLegajo(t) {
-    panel.innerHTML = '<h3>🚗 Buscando el legajo de ' + t.cliente + '…</h3>';
+    panel.innerHTML = '<div class="hd"><b>🔎 Buscando el legajo</b><div class="est">' + esc(t.cliente) + '…</div></div>';
     const filas = await buscarLegajos(t);
-    if (!filas.length) { panel.innerHTML = '<h3>🚗 Asistente Entregas</h3><small>No encontré el legajo de ' + t.cliente + ' (VIN …' + t.vin.slice(-8) + '). Abrilo a mano.</small>'; return; }
+    if (!filas.length) { panel.innerHTML = '<div class="hd"><b>🚗 Asistente Entregas</b><div class="est mal">⚠ No encontré el legajo de ' + esc(t.cliente) + ' (VIN …' + esc(t.vin.slice(-8)) + ')</div></div><div class="bd" style="color:#cbd5e1;font-size:13px">Abrilo a mano en Pilot y hacelo desde ahí, o tocá "Ya está hecho" si ya lo hiciste.</div>'; return; }
     const ir = f => { const g = guidFila(f); if (!g) { panel.innerHTML = '<small>No pude abrir el legajo.</small>'; return; }
       GM_setValue('tarea', Object.assign({}, t, datosFila(f))); location.href = '/adminfileContext/index.php?guid=' + g + '#asistente'; };
     if (filas.length === 1) return ir(filas[0]);
-    panel.innerHTML = '<h3>🚗 ¿Cuál es el legajo de ' + t.cliente + '?</h3>' + filas.map((f, i) =>
-      `<div class="it"><b>${nombreFila(f)}</b><small>Legajo #${datosFila(f).adminFileId} · ${String(f.unit_description || '').replace(/<[^>]+>/g, ' ')}</small><button class="h" data-leg="${i}">Este</button></div>`).join('');
+    panel.innerHTML = '<div class="hd"><b>¿Cuál es el legajo de ' + esc(t.cliente) + '?</b><div class="est">Encontré ' + filas.length + ' posibles</div></div><div class="bd">' + filas.map((f, i) =>
+      `<div class="it"><div class="cl">${esc(nombreFila(f))}</div><div class="md">Legajo #${datosFila(f).adminFileId} · ${esc(String(f.unit_description || '').replace(/<[^>]+>/g, ' '))}</div><div class="bt"><button class="h" data-leg="${i}">Es este</button></div></div>`).join('') + '</div>';
     panel.querySelectorAll('[data-leg]').forEach(b => b.onclick = e => { e.stopPropagation(); ir(filas[+b.dataset.leg]); });
   }
   if (location.pathname.indexOf('/adminfileContext/') === 0 && location.hash === '#asistente' && GM_getValue('tarea', null)) hacerAlaVista(GM_getValue('tarea'));
@@ -162,7 +228,7 @@
       await pasos(t, W, paso, msg => confirm(msg));
       await api('marcarPilot', [t.clave, 'asistente', t.cliente + ': ' + QUE[t.accion]]); sacarEsperaVos(t); historial(t.cliente + ': ' + QUE[t.accion] + ' ✔');
       fin(true, 'Todo hecho en Pilot');
-    } catch (e) { fin(false, (e instanceof NecesitaVos ? 'Cancelado: ' : 'Se frenó: ') + e.message + '. Lo que ya se hizo quedó hecho; revisá el legajo.'); }
+    } catch (e) { marcarEsperaVos(t, e.message, e instanceof NecesitaVos); fin(false, (e instanceof NecesitaVos ? 'Cancelado: ' : 'Se frenó: ') + e.message + '. Lo que ya se hizo quedó hecho; revisá el legajo.'); }
   }
 
   /* ---------- Los pasos (sirven a la vista o en segundo plano). w = ventana del legajo ---------- */
@@ -186,6 +252,7 @@
     const id = t.adminFileId, sale = w.getSaleId ? w.getSaleId() : $('#sale_id').val();
     const textoEntregas = norm((d.getElementById('entregas') || d.body).innerText);
 
+    const yaHecho = k => !!prog(t.clave)[k], hecho = k => anotarProg(t.clave, k);
     const tarea = nombre => { const n = norm(nombre);
       for (const inp of d.querySelectorAll('[id^="chk_tarea_"]')) {
         const tit = inp.closest('li') && inp.closest('li').querySelector('.task-title-sp');
@@ -211,34 +278,45 @@
     }
     if (t.accion === 'preok') {
       await cerrarTarea('Pre entrega ok');
-      if (/pre entrega ok \d/.test(textoEntregas) || /controles.*pre entrega ok/.test(textoEntregas)) paso('• Controles ya tenía "Pre Entrega ok"');
-      else { await post('/adminfileContext/services/add.delivery.check.php', { delivery_check_stage_id: CONTROL_PRE_OK, delivery_check_dt: t.fecha, sale_id: sale }); paso('✔ Controles: Pre Entrega ok ' + t.fecha); }
+      const ctl = d.querySelector('#entregas') ? [...d.querySelectorAll('#entregas tr, #entregas li, #entregas .row')].map(x => norm(x.innerText)) : [];
+      const yaTiene = ctl.some(x => /pre[\s-]*entrega ok/.test(x) && /\d{2}\/\d{2}\/\d{4}/.test(x) && !/asignar|tarea/.test(x));
+      if (yaTiene || yaHecho('control')) paso('• Controles ya tenía "Pre Entrega ok" con fecha');
+      else {
+        if (!sale) throw new Error('no encontré el número de venta del legajo para cargar el control');
+        await post('/adminfileContext/services/add.delivery.check.php', { delivery_check_stage_id: CONTROL_PRE_OK, delivery_check_dt: t.fecha, sale_id: sale });
+        hecho('control'); paso('✔ Controles: Pre Entrega ok ' + t.fecha);
+      }
     }
     if (t.accion === 'cita') {
-      if (textoEntregas.indexOf('no hay planificacion de entrega') < 0) paso('• Ya había una entrega planificada: si cambió la fecha, cambiala a mano en Planificar');
+      if (yaHecho('plan') || textoEntregas.indexOf('no hay planificacion de entrega') < 0) paso('• Ya había una entrega planificada: si cambió la fecha, cambiala a mano en Planificar');
       else {
         const h = await horarioPilot(t.fecha, t.hora);
         const dd = { sale_id: sale, sale_admin_id: $('#sale_admin_id').val(), sale_delivery_rep_id: DANIEL, sale_delivered_branch_id: CASA_CENTRAL,
           sale_approximate_delivery_last_time: h, sale_approximate_delivery_last_date: dmyGuion(t.fecha) };
         if ($('#sale_rep_id').val()) dd.sale_rep_id = $('#sale_rep_id').val();
-        await post('/adminfileContext/services/schedule.delivery.php', dd); paso('✔ Planificada: ' + t.fecha + ' ' + h.slice(0, 2) + ':' + h.slice(2) + ' · Daniel Diaz · Casa Central');
+        await post('/adminfileContext/services/schedule.delivery.php', dd); hecho('plan'); paso('✔ Planificada: ' + t.fecha + ' ' + h.slice(0, 2) + ':' + h.slice(2) + ' · Daniel Diaz · Casa Central');
       }
       await cerrarTarea('Agendar cita para retirar la unidad');
     }
     if (t.accion === 'entregado') {
-      if (!($('#stockDomain').attr('data-value') || '') && !preguntar('Este auto no tiene patente cargada en Pilot. ¿Lo marco como entregado igual?'))
-        throw new NecesitaVos('el auto no tiene patente cargada en Pilot: confirmá con "Hacer"');
-      if (/fecha de entrega: \d/.test(textoEntregas)) paso('• La entrega ya estaba marcada');
+      if (!($('#stockDomain').attr('data-value') || '')) paso('• El auto no tiene patente cargada en Pilot (la entrega se marca igual)');
+      if (yaHecho('marcar') || /fecha de entrega: \d/.test(textoEntregas)) paso('• La entrega ya estaba marcada');
       else {
-        const h = await horarioPilot(t.fecha, t.hora || '12:00');
-        const dd = { sale_id: sale, sale_delivery_rep_id: DANIEL, sale_delivered_branch_id: CASA_CENTRAL, sale_delivered_time: h,
+        if (!sale) throw new Error('no encontré el número de venta del legajo');
+        const dd = { sale_id: sale, sale_delivery_rep_id: DANIEL, sale_delivered_branch_id: CASA_CENTRAL,
           sale_delivered_inconvenience_flag: 0, sale_delivered_inconvenience_notes: '', sale_delivered_dt: dmyGuion(t.fecha) };
         if ($('#sale_rep_id').val()) dd.sale_rep_id = $('#sale_rep_id').val();
-        await post('/adminfileContext/services/marcar.delivery.php', dd); paso('✔ Entrega realizada ' + t.fecha + ' ' + h.slice(0, 2) + ':' + h.slice(2));
+        // la hora de la entrega redondeada a la media hora (así la pide Pilot); si no la acepta, uso un horario que Pilot ofrezca
+        const hm = hhmm(t.hora || '12:00'); let h = hm.slice(0, 2) + (+hm.slice(2) >= 30 ? '30' : '00');
+        try { await post('/adminfileContext/services/marcar.delivery.php', Object.assign({ sale_delivered_time: h }, dd)); }
+        catch (e) { h = await horarioPilot(t.fecha, t.hora || '12:00'); await post('/adminfileContext/services/marcar.delivery.php', Object.assign({ sale_delivered_time: h }, dd)); }
+        hecho('marcar'); paso('✔ Entrega realizada ' + t.fecha + ' ' + h.slice(0, 2) + ':' + h.slice(2));
       }
-      await cerrarTarea('Entrega Realizada');
-      await post('/api/adminfiles/transfer.php', { admin_file_id: id, to_user_id: AZUL, comment: 'Unidad entregada (Daniel Diaz).' }); paso('✔ Legajo transferido a Azul Anabel Behotas');
-      await post('/api/adminfiles/labels.php', { admin_file_id: id, admin_file_label_id: ETIQUETA_ENTREGADO }); paso('✔ Etiqueta → Entregado');
+      await cerrarTarea('Entrega Realizada', true);
+      if (yaHecho('transfer')) paso('• Ya estaba transferido a Azul');
+      else { await post('/api/adminfiles/transfer.php', { admin_file_id: id, to_user_id: AZUL, comment: 'Unidad entregada (Daniel Diaz).' }); hecho('transfer'); paso('✔ Legajo transferido a Azul Anabel Behotas'); }
+      if (yaHecho('label')) paso('• Ya tenía la etiqueta Entregado');
+      else { await post('/api/adminfiles/labels.php', { admin_file_id: id, admin_file_label_id: ETIQUETA_ENTREGADO }); hecho('label'); paso('✔ Etiqueta → Entregado'); }
     }
   }
 
@@ -266,23 +344,42 @@
     await api('marcarPilot', [t.clave, 'automático', t.cliente + ': ' + QUE[t.accion]]);
     return hechos.filter(x => x[0] === '✔').length;
   }
-  async function autoCiclo() {
-    if (!cfg() || !autoOn() || /\/login|logout/.test(location.pathname) || !W.$ || !W.gl_user_id) return;
-    if (Date.now() - GM_getValue('autoLock', 0) < CADA - 10000) return;   // otra pestaña de Pilot ya lo está haciendo
-    GM_setValue('autoLock', Date.now());
+  // Le cuenta a la app qué falta en Pilot y qué no se pudo (sale en la 🔔, sección Pilot)
+  async function reportar() {
+    if (!listaOk) return;
     try {
-      lista = await api('getPilotPendientes'); pintarBtn();
       const ev = esperanVos();
+      await api('pilotReporte', [{ auto: autoOn(), ver: VER, pend: lista.map(t => { const x = ev[t.clave];
+        return { clave: t.clave, cliente: t.cliente, accion: t.accion, vin: t.vin, fecha: t.fecha || '', motivo: x ? x.motivo : '', espera: !!(x && x.espera), intentos: x ? x.n : 0 }; }) }]);
+    } catch (e) {}
+  }
+  async function autoCiclo() {
+    if (!cfg()) return estado('Falta el código de acceso de la app', true);
+    if (!autoOn()) { if (Date.now() - (autoCiclo.rep || 0) > 5 * 60000) { autoCiclo.rep = Date.now(); api('getPilotPendientes').then(l => { guardarLista(l); pintarBtn(); reportar(); }).catch(() => {}); } return; }
+    if (/\/login|logout/.test(location.pathname)) return estado('Pilot pide iniciar sesión', true);
+    if (!W.$ || !W.gl_user_id) return estado('Esta página de Pilot no sirve: abrí el listado de legajos', true);
+    if (corriendo) return;   // todavía está terminando la vuelta anterior
+    if (Date.now() - GM_getValue('autoLock', 0) < 45000) return;   // otra pestaña de Pilot ya lo está haciendo
+    corriendo = true; GM_setValue('autoLock', Date.now());
+    const latido = setInterval(() => GM_setValue('autoLock', Date.now()), 15000);   // avisa a las otras pestañas que sigue trabajando
+    try {
+      guardarLista(await api('getPilotPendientes')); pintarBtn();
+      const ev0 = esperanVos(), vivas = {}; lista.forEach(t => vivas[t.clave] = 1);   // lo que ya no está pendiente en la app se olvida
+      Object.keys(ev0).forEach(k => { if (!vivas[k]) delete ev0[k]; }); GM_setValue('esperanVos', ev0);
+      const ev = esperanVos();
+      const esperando = lista.filter(t => trabado(ev[t.clave])).length;
+      estado('Leí la app: ' + (lista.length ? lista.length + ' pendiente' + (lista.length > 1 ? 's' : '') + (esperando ? ' (' + esperando + ' esperan que los revises)' : '') : 'nada pendiente'));
       for (const t of lista) {
-        if (ev[t.clave] || !autoOn()) continue;
+        if (trabado(esperanVos()[t.clave]) || !autoOn()) continue;
         GM_setValue('autoLock', Date.now());
         estadoAuto = '🤖 ' + t.cliente.split(' ')[0]; pintarBtn();
-        try { const n = await hacerSolo(t); historial('🤖 ' + t.cliente + ': ' + QUE[t.accion] + (n ? ' ✔' : ' (ya estaba hecho)')); }
-        catch (e) { marcarEsperaVos(t, e instanceof NecesitaVos ? e.message : 'se frenó: ' + e.message + ' (probá con "Hacer")'); historial('⚠ ' + t.cliente + ': ' + (e.message || e)); }
+        try { const n = await hacerSolo(t); sacarEsperaVos(t); historial('🤖 ' + t.cliente + ': ' + QUE[t.accion] + (n ? ' ✔' : ' (ya estaba hecho)')); }
+        catch (e) { marcarEsperaVos(t, e instanceof NecesitaVos ? e.message : 'se frenó: ' + (e.message || e), e instanceof NecesitaVos); historial('⚠ ' + t.cliente + ': ' + (e.message || e)); }
       }
-      lista = await api('getPilotPendientes');
-    } catch (e) { /* sin conexión: reintenta en el próximo ciclo */ }
-    finally { estadoAuto = ''; pintarBtn(); if (panel.style.display === 'block') cargar(); }
+      guardarLista(await api('getPilotPendientes'));
+      await reportar();
+    } catch (e) { estado('No pude leer la app: ' + (e.message || e), true); }
+    finally { clearInterval(latido); GM_setValue('autoLock', 0); corriendo = false; estadoAuto = ''; pintarBtn(); if (panel.style.display === 'block') pintarPanel(); }
   }
 
   /* ---------- Vigía: avisa en la app (solo lee Pilot, no cambia nada) ----------
@@ -347,10 +444,19 @@
 
   /* ---------- Arranque ---------- */
   const latir = () => api('pilotLatido').catch(() => {});   // la app muestra "● Pilot" en verde mientras esto llegue
-  if (cfg() && !/login/.test(location.host + location.pathname)) {
-    api('getPilotPendientes').then(l => { lista = l; pintarBtn(); }).catch(() => {});
+  if (!/login/.test(location.host + location.pathname)) {   // arranca aunque todavía no esté el código: cuando lo cargues, sigue solo
+    if (cfg()) api('getPilotPendientes').then(l => { guardarLista(l); pintarBtn(); reportar(); }).catch(e => estado('No pude leer la app: ' + e.message, true));
     latir(); setInterval(latir, 120000);
-    setTimeout(autoCiclo, 20000); setInterval(autoCiclo, CADA);
+    setTimeout(autoCiclo, 3000); setInterval(autoCiclo, CADA);
+    // Al instante: la app anota la hora de cada cambio (getPilotVer); si cambió, hace la revisión completa ya
+    let verVista = null;
+    setInterval(async () => {
+      if (!cfg() || !autoOn() || corriendo) return;
+      try { const v = await api('getPilotVer'); if (v !== verVista) { const primera = verVista === null; verVista = v; if (!primera) autoCiclo(); } } catch (e) {}
+    }, RAPIDO);
+    // Al volver a la pestaña de Pilot, se fija en el momento (sin esperar los 10 segundos)
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) autoCiclo(); });
+    window.addEventListener('focus', () => autoCiclo());
     setTimeout(vigilar, 40000); setInterval(vigilar, 10 * 60000);   // avisos de Pilot a la app, cada 10 minutos
   }
 })();
