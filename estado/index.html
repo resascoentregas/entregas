@@ -98,7 +98,6 @@ function puente() {
       this.textContent = 'Actualizando…'; this.disabled = true;
       location.replace(location.pathname + '?' + (location.search.indexOf('abrir') >= 0 ? 'abrir=1&' : '') + 'u=' + Date.now());
     };
-    ['click', 'touchstart', 'keydown', 'wheel'].forEach(function (ev) { o.addEventListener(ev, function (e) { e.stopPropagation(); }, true); });
     document.body.appendChild(o);
     requestAnimationFrame(function () { o.style.opacity = '1'; });
     try { document.activeElement && document.activeElement.blur(); } catch (e) {}
