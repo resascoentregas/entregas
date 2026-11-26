@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente Entregas → Pilot
 // @namespace    resascoentregas
-// @version      3.2
+// @version      3.3
 // @description  Hace en Pilot los pasos de cada entrega que marcás en la app Entregas (pre-entrega, controles, planificar, entregado, transferir a Azul, etiqueta). Con Pilot abierto, lo hace al instante (se fija cada 3 segundos si marcaste algo), y te avisa en la app cuando un legajo pasa a "Ok para entrega" o alguien deja un comentario.
 // @match        https://app.pilotsolution.com.ar/*
 // @noframes
@@ -24,7 +24,7 @@
   const YA_EN_PREENTREGA = ['en preentrega', 'en entrega', 'cierre de legajo'];
   const CADA = 60000;   // revisión completa de respaldo, cada 1 minuto
   const RAPIDO = 3000;  // cada 3 segundos pregunta si marcaste algo en la app (es instantáneo)
-  const VER = '3.2', MAX_INTENTOS = 5;
+  const VER = '3.3', MAX_INTENTOS = 5;
   let corriendo = false;   // no arranca otra vuelta mientras termina la anterior
 
   /* ---------- Conexión con la app Entregas ---------- */
@@ -74,7 +74,8 @@
   const CORTO = { preentrega: 'Pasar a pre-entrega', preok: 'Pre-entrega OK', cita: 'Planificar entrega', entregado: 'Entrega realizada' };
   const css = document.createElement('style');
   css.textContent = `
-  #ae-btn{position:fixed;right:16px;bottom:16px;z-index:99999;display:flex;align-items:center;gap:7px;background:#fff;color:#111827;border:1px solid #e5e7eb;border-radius:999px;padding:8px 13px;font:600 13px system-ui,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.12);cursor:pointer}
+  #ae-btn{position:fixed;right:16px;bottom:16px;z-index:99999;display:flex;align-items:center;gap:7px;background:#fff;color:#111827;border:1px solid #e5e7eb;border-radius:999px;padding:8px 13px;font:600 13px system-ui,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.12);cursor:grab;touch-action:none;user-select:none}
+  #ae-btn.mov{cursor:grabbing;opacity:.85}
   #ae-btn i{width:8px;height:8px;border-radius:50%;background:#22c55e}
   #ae-btn.pend i{background:#f59e0b}#ae-btn.trab i{background:#ef4444}#ae-btn.off i{background:#9ca3af}
   #ae-btn.hace i{background:#3b82f6;animation:aeLat 1s infinite}@keyframes aeLat{50%{opacity:.3}}
@@ -123,7 +124,24 @@
     btn.title = !autoOn() ? 'Automático apagado: tocá para prenderlo' : nTrab ? nTrab + ' necesitan que toques "Hacer"' : lista.length ? 'Pendientes: se hacen solos' : 'Pilot al día con la app';
   };
   pintarBtn();
-  btn.onclick = () => { const ver = panel.style.display !== 'block'; panel.style.display = ver ? 'block' : 'none'; if (ver) cargar(); };
+  // 3.3: el botón se puede arrastrar a cualquier lugar (queda guardado); el panel se abre al lado
+  const ubicarPanel = () => { const r = btn.getBoundingClientRect(), W0 = innerWidth, H0 = innerHeight;
+    panel.style.left = Math.max(8, Math.min(r.right - 330, W0 - 338)) + 'px'; panel.style.right = 'auto';
+    if (r.top > H0 / 2) { panel.style.bottom = (H0 - r.top + 8) + 'px'; panel.style.top = 'auto'; }
+    else { panel.style.top = (r.bottom + 8) + 'px'; panel.style.bottom = 'auto'; } };
+  const ponerBtn = (x, y) => { x = Math.max(4, Math.min(x, innerWidth - btn.offsetWidth - 4)); y = Math.max(4, Math.min(y, innerHeight - btn.offsetHeight - 4));
+    btn.style.left = x + 'px'; btn.style.top = y + 'px'; btn.style.right = 'auto'; btn.style.bottom = 'auto'; };
+  const pos0 = GM_getValue('btnPos', null); if (pos0) ponerBtn(pos0.x, pos0.y);
+  window.addEventListener('resize', () => { const p = GM_getValue('btnPos', null); if (p) ponerBtn(p.x, p.y); if (panel.style.display === 'block') ubicarPanel(); });
+  let arr = null, movido = false;
+  btn.addEventListener('pointerdown', e => { const r = btn.getBoundingClientRect(); arr = { dx: e.clientX - r.left, dy: e.clientY - r.top, x0: e.clientX, y0: e.clientY }; movido = false; btn.setPointerCapture(e.pointerId); });
+  btn.addEventListener('pointermove', e => { if (!arr) return;
+    if (!movido && Math.abs(e.clientX - arr.x0) + Math.abs(e.clientY - arr.y0) < 6) return;
+    movido = true; btn.classList.add('mov'); ponerBtn(e.clientX - arr.dx, e.clientY - arr.dy); if (panel.style.display === 'block') ubicarPanel(); });
+  btn.addEventListener('pointerup', () => { if (!arr) return; arr = null; btn.classList.remove('mov');
+    if (movido) { const r = btn.getBoundingClientRect(); GM_setValue('btnPos', { x: r.left, y: r.top }); } });
+  btn.ondblclick = () => { GM_deleteValue('btnPos'); btn.style.cssText = ''; if (panel.style.display === 'block') ubicarPanel(); };   // doble clic: vuelve a la esquina
+  btn.onclick = () => { if (movido) { movido = false; return; } const ver = panel.style.display !== 'block'; panel.style.display = ver ? 'block' : 'none'; if (ver) { ubicarPanel(); cargar(); } };
 
   function pintarPanel(cargando) {
     const ev = esperanVos(), nTrab = lista.filter(t => trabado(ev[t.clave])).length, e = GM_getValue('estado', null), on = autoOn();
