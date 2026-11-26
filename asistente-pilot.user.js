@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente Entregas → Pilot
 // @namespace    resascoentregas
-// @version      3.1
+// @version      3.2
 // @description  Hace en Pilot los pasos de cada entrega que marcás en la app Entregas (pre-entrega, controles, planificar, entregado, transferir a Azul, etiqueta). Con Pilot abierto, lo hace al instante (se fija cada 3 segundos si marcaste algo), y te avisa en la app cuando un legajo pasa a "Ok para entrega" o alguien deja un comentario.
 // @match        https://app.pilotsolution.com.ar/*
 // @noframes
@@ -24,7 +24,7 @@
   const YA_EN_PREENTREGA = ['en preentrega', 'en entrega', 'cierre de legajo'];
   const CADA = 60000;   // revisión completa de respaldo, cada 1 minuto
   const RAPIDO = 3000;  // cada 3 segundos pregunta si marcaste algo en la app (es instantáneo)
-  const VER = '3.1', MAX_INTENTOS = 5;
+  const VER = '3.2', MAX_INTENTOS = 5;
   let corriendo = false;   // no arranca otra vuelta mientras termina la anterior
 
   /* ---------- Conexión con la app Entregas ---------- */
@@ -128,7 +128,7 @@
   function pintarPanel(cargando) {
     const ev = esperanVos(), nTrab = lista.filter(t => trabado(ev[t.clave])).length, e = GM_getValue('estado', null), on = autoOn();
     const item = (t, i) => { const x = ev[t.clave];
-      return `<div class="fila ${trabado(x) ? 'av' : ''}" title="${esc((t.modelo || '') + ' · VIN ' + t.vin)}"><div class="tx"><b>${esc(t.cliente)}</b><small>${t.cambio ? 'Reprogramar entrega' : CORTO[t.accion] || esc(t.accion)}${t.fecha ? ' · ' + esc(t.fecha) : ''}</small>` +
+      return `<div class="fila ${trabado(x) ? 'av' : ''}" title="${esc((t.modelo || '') + ' · VIN ' + t.vin)}"><div class="tx"><b>${esc(t.cliente)}</b><small>${t.cambio ? 'Reprogramar entrega' : t.soloControl ? 'Fecha pre-entrega en Controles' : CORTO[t.accion] || esc(t.accion)}${t.fecha ? ' · ' + esc(t.fecha) : ''}</small>` +
         (x ? `<em>${trabado(x) ? '⚠ ' : '↻ '}${esc(x.motivo)}</em>` : '') + `</div><div class="ac"><button class="h" data-i="${i}">Hacer</button><button class="s" data-x="${i}">ya está</button></div></div>`; };
     const hist = GM_getValue('historial', []);
     const sub = e && e.mal ? '⚠ ' + esc(e.txt) : cargando && !lista.length ? 'Buscando…' : !lista.length ? 'Al día con la app ✓' :
@@ -273,14 +273,21 @@
       const h = hhmm(hora), antes = slots.filter(s => s <= h);
       return antes.length ? antes[antes.length - 1] : slots[0]; };
 
-    if (t.accion === 'preentrega' || t.accion === 'preok') {
+    // Tabla "Controles" (Agenda de entrega y unidad): filas [control, fecha, responsable]; null si no está en la página
+    const filasControl = () => { for (const tb of d.querySelectorAll('table')) { const rs = [...tb.rows]; if (!rs.length) continue;
+        const cab = norm(rs[0].innerText); if (!/control/.test(cab) || !/fecha/.test(cab) || !/responsable/.test(cab)) continue;
+        return rs.slice(1).map(r => [...r.cells].map(c => norm(c.innerText))); } return null; };
+    if ((t.accion === 'preentrega' || t.accion === 'preok') && !t.soloControl) {
       await cerrarTarea('Asignar turno pre-entrega y accesorios', true);
       await pasarAPreentrega();
     }
     if (t.accion === 'preok') {
-      await cerrarTarea('Pre entrega ok');
-      const ctl = d.querySelector('#entregas') ? [...d.querySelectorAll('#entregas tr, #entregas li, #entregas .row')].map(x => norm(x.innerText)) : [];
-      const yaTiene = ctl.some(x => /pre[\s-]*entrega ok/.test(x) && /\d{2}\/\d{2}\/\d{4}/.test(x) && !/asignar|tarea/.test(x));
+      if (!t.soloControl) await cerrarTarea('Pre entrega ok');
+      // 3.2: se fija SOLO en la tabla Controles (antes leía bloques enteros y a veces creía que ya estaba)
+      let ctl = filasControl();
+      if (!ctl) { const tb = d.getElementById('tab-entregas'); if (tb) tb.click(); for (let i = 0; i < 20 && !(ctl = filasControl()); i++) await esperar(500); }
+      if (!ctl) throw new Error('no encontré la tabla Controles del legajo');
+      const yaTiene = ctl.some(c => /pre[\s-]*entrega\s*ok/.test(c[0] || '') && /\d{2}\/\d{2}\/\d{4}/.test(c[1] || ''));
       if (yaTiene || yaHecho('control')) paso('• Controles ya tenía "Pre Entrega ok" con fecha');
       else {
         if (!sale) throw new Error('no encontré el número de venta del legajo para cargar el control');
