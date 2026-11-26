@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <title>Entregas</title>
-<link rel="apple-touch-icon" href="https://lh3.googleusercontent.com/d/1KREbmeflchSKmfAKPHcVAaz0-etsHKaa">
-<link rel="icon" type="image/png" href="https://lh3.googleusercontent.com/d/1KREbmeflchSKmfAKPHcVAaz0-etsHKaa">
+<link rel="apple-touch-icon" href="icono-180.png?v=2">
+<link rel="icon" type="image/png" href="favicon.png?v=2">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -17,10 +17,14 @@
   body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
          background: #0e1014; color: #eceef2; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif; text-align: center; }
   .caja { max-width: 360px; width: 100%; }
-  img { width: 96px; height: 96px; border-radius: 24px; box-shadow: 0 10px 34px rgba(0,0,0,.55); animation: latido 1.6s ease-in-out infinite; }
+  .logo { width: min(230px, 62vw); margin: 0 auto; filter: drop-shadow(0 6px 26px rgba(225,29,72,.55)); }
+  .logo img { display: block; height: auto; margin: 0 auto; }
+  .logo .jr { width: 100%; margin-bottom: 9%; animation: pop .55s cubic-bezier(.2,1.5,.35,1) both; }
+  .logo .rs { width: 90.7%; animation: entra .45s cubic-bezier(.2,.9,.3,1) .42s both; }
+  @keyframes pop { 0% { opacity: 0; transform: scale(.4) rotate(-12deg); } 70% { opacity: 1; } 100% { opacity: 1; transform: none; } }
   @keyframes latido { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }
   @keyframes entra { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
-  h1 { font-size: 21px; margin: 18px 0 6px; animation: entra .5s ease both .1s; }
+  h1 { font-size: 12.5px; font-weight: 600; letter-spacing: .42em; text-transform: uppercase; color: #8b93a1; margin: 20px 0 6px; animation: entra .5s ease both .6s; }
   p { color: #8b93a1; font-size: 14px; line-height: 1.5; margin: 6px 0; }
   .barra { width: 120px; height: 3px; border-radius: 3px; background: #262b34; margin: 22px auto 0; overflow: hidden; }
   .barra::after { content: ""; display: block; width: 40%; height: 100%; background: #e11d48; border-radius: 3px; animation: va 1s ease-in-out infinite; }
@@ -35,8 +39,8 @@
 </head>
 <body>
 <div class="caja">
-  <img src="https://lh3.googleusercontent.com/d/1KREbmeflchSKmfAKPHcVAaz0-etsHKaa" alt="">
-  <h1>Entregas Jeep · RAM</h1>
+  <div class="logo"><img class="jr" src="jeepram.png" alt="Jeep RAM"><img class="rs" src="resasco_txt.png" alt="Resasco"></div>
+  <h1>Entregas</h1>
   <div id="cargando"><div class="barra"></div></div>
   <div id="form">
     <p>Pegá el código de acceso que te llegó por mail.</p>
@@ -91,7 +95,7 @@ function mostrar(html, cfg) {
   if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', function () { mostrar(html, cfg); }); return; }
   var extra = '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">' +
     '<meta name="theme-color" content="#0e1014"><link rel="manifest" href="manifest.webmanifest">' +
-    '<link rel="apple-touch-icon" href="https://lh3.googleusercontent.com/d/1KREbmeflchSKmfAKPHcVAaz0-etsHKaa">' +
+    '<link rel="apple-touch-icon" href="icono-180.png?v=2"><link rel="icon" type="image/png" href="favicon.png?v=2">' +
     '<title>Entregas</title><script>window.__API=' + JSON.stringify(cfg) + ';(' + puente.toString() + ')();<\/script>';
   html = html.replace(/<base[^>]*>/i, '').replace(/<head>/i, '<head>' + extra);
   document.open(); document.write(html); document.close();
