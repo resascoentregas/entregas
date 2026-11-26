@@ -42,6 +42,7 @@
 <script>
 /* Link para compartir (solo ver). Muestra la pantalla de la app sin pasar por la página de Google,
    así no aparece el cartel "Un usuario de Google Apps Script creó esta aplicación". */
+var WRAP_VER = '2';
 var API = 'https://script.google.com/macros/s/AKfycbwMccMP6rNIBN-iutoZVSfVqYasFBMve_L3eUG1JDRx5FhUtV1idSD72ImTmHms3ooa2w/exec';
 var LG = Storage.prototype.getItem, LS = Storage.prototype.setItem;   // originales (la pantalla después usa memoria aparte)
 function leer(k) { try { return LG.call(localStorage, k); } catch (e) { return null; } }
@@ -55,7 +56,8 @@ function pedir(fn, args) {
 function puente() {
   var API = window.__API;
   // Memoria aparte (prefijo est_): si se abre en el celular del dueño, no pisa los datos guardados de su app
-  try { var P = Storage.prototype, g = P.getItem, s = P.setItem, r = P.removeItem;
+  var s = Storage.prototype.setItem;
+  try { var P = Storage.prototype, g = P.getItem, r = P.removeItem; s = P.setItem;
     P.getItem = function (k) { return g.call(this, 'est_' + k); };
     P.setItem = function (k, v) { return s.call(this, 'est_' + k, v); };
     P.removeItem = function (k) { return r.call(this, 'est_' + k); }; } catch (e) {}
@@ -76,22 +78,66 @@ function puente() {
   }
   window.google = { script: { run: corredor(), host: { close: function () {} },
     url: { getLocation: function (cb) { cb({ parameter: { ver: '1' }, parameters: {}, hash: '' }); } } } };
+  function huella(x) { var h = 5381; for (var i = 0; i < x.length; i++) h = ((h << 5) + h + x.charCodeAt(i)) | 0; return String(h) + ':' + x.length; }
+  var ultima = 0;
+  // Versión nueva: tapa toda la pantalla y no deja seguir hasta tocar "Actualizar ahora"
+  function bloquear() {
+    if (document.getElementById('__upd') || !document.body) return;
+    var o = document.createElement('div'); o.id = '__upd';
+    o.setAttribute('style', 'position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:24px;' +
+      'background:rgba(10,12,16,.94);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);font-family:-apple-system,system-ui,sans-serif;' +
+      'opacity:0;transition:opacity .3s');
+    o.innerHTML = '<div style="max-width:340px;width:100%;text-align:center;color:#fff;background:#14171c;border:1px solid rgba(225,29,72,.5);' +
+      'border-radius:24px;padding:28px 22px;box-shadow:0 20px 60px rgba(0,0,0,.5)">' +
+      '<div style="font-size:44px;line-height:1">✨</div>' +
+      '<div style="font-size:20px;font-weight:800;margin:12px 0 6px">Hay una versión nueva</div>' +
+      '<div style="font-size:14.5px;color:#a3aab6;line-height:1.5">Para seguir usando la app tenés que actualizar. Tarda unos segundos.</div>' +
+      '<button style="display:block;width:100%;margin-top:20px;padding:15px;border:0;border-radius:16px;background:#e11d48;color:#fff;' +
+      'font:800 16px -apple-system,system-ui,sans-serif;cursor:pointer">Actualizar ahora</button></div>';
+    o.querySelector('button').onclick = function () {
+      this.textContent = 'Actualizando…'; this.disabled = true;
+      location.replace(location.pathname + '?' + (location.search.indexOf('abrir') >= 0 ? 'abrir=1&' : '') + 'u=' + Date.now());
+    };
+    ['click', 'touchstart', 'keydown', 'wheel'].forEach(function (ev) { o.addEventListener(ev, function (e) { e.stopPropagation(); }, true); });
+    document.body.appendChild(o);
+    requestAnimationFrame(function () { o.style.opacity = '1'; });
+    try { document.activeElement && document.activeElement.blur(); } catch (e) {}
+  }
+  // ¿Cambió esta página de GitHub? (WRAP_VER es el número de versión escrito en la página)
+  function paginaNueva() {
+    return fetch(location.pathname + '?nv=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.text(); })
+      .then(function (t) { var m = t.match(/var WRAP_VER = '([^']+)'/); if (!m || !window.__WRAP || m[1] === window.__WRAP) return false;
+        try { if (sessionStorage.getItem('updWrap') === m[1]) return false; sessionStorage.setItem('updWrap', m[1]); } catch (e) {}   // si ya se intentó, no trabo de nuevo
+        return true; }, function () { return false; });
+  }
+  function revisar() {
+    if (Date.now() - ultima < 30000) return; ultima = Date.now();
+    fetch(API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ fn: '_html', args: [] }) })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { if (!j.ok || !j.r) return; try { s.call(localStorage, 'estadoHtml', j.r); } catch (e) {}
+        if (window.__VER && huella(j.r) !== window.__VER) { var hv = huella(j.r); try { if (sessionStorage.getItem('updHtml') === hv) return; sessionStorage.setItem('updHtml', hv); } catch (e) {} bloquear(); } }, function () {});
+    paginaNueva().then(function (n) { if (n) bloquear(); });
+  }
+  setTimeout(revisar, 3000);
+  setInterval(revisar, 5 * 60000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) revisar(); });
 }
 
+function huellaTop(x) { var h = 5381; for (var i = 0; i < x.length; i++) h = ((h << 5) + h + x.charCodeAt(i)) | 0; return String(h) + ':' + x.length; }
 function mostrar(html) {
   if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', function () { mostrar(html); }); return; }
   var extra = '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">' +
     '<meta name="theme-color" content="#0e1014"><link rel="manifest" href="manifest.webmanifest">' +
     '<link rel="apple-touch-icon" href="../icono-180.png?v=3"><link rel="icon" type="image/png" href="../favicon.png?v=3">' +
-    '<title>Estado de autos</title><script>window.__API=' + JSON.stringify(API) + ';(' + puente.toString() + ')();<\/script>';
+    '<title>Estado de autos</title><script>window.__API=' + JSON.stringify(API) + ';window.__VER=' + JSON.stringify(huellaTop(html)) + ';window.__WRAP=' + JSON.stringify(WRAP_VER) + ';(' + puente.toString() + ')();<\/script>';
   html = html.replace(/<base[^>]*>/i, '').replace(/<head>/i, '<head>' + extra);
   document.open(); document.write(html); document.close();
 }
 
+if (/[?&]u=\d/.test(location.search)) history.replaceState(null, '', location.pathname);
 var guardada = leer('estadoHtml');
 if (guardada) {
   mostrar(guardada);
-  pedir('_html').then(function (h) { guardar('estadoHtml', h); }, function () {});   // la próxima vez abre la más nueva
 } else {
   pedir('_html').then(function (h) { guardar('estadoHtml', h); mostrar(h); }, function () {
     document.getElementById('cargando').style.display = 'none'; document.getElementById('error').style.display = 'block';
