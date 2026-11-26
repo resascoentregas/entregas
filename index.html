@@ -19,12 +19,19 @@
   .caja { max-width: 360px; width: 100%; }
   .logo { width: min(230px, 62vw); margin: 0 auto; filter: drop-shadow(0 6px 26px rgba(225,29,72,.55)); }
   .logo img { display: block; height: auto; margin: 0 auto; }
-  .logo .jr { width: 100%; margin-bottom: 9%; animation: pop .55s cubic-bezier(.2,1.5,.35,1) both; }
-  .logo .rs { width: 90.7%; animation: entra .45s cubic-bezier(.2,.9,.3,1) .42s both; }
+  .logo { animation: aparece .4s ease .9s both; }   /* solo se ve si la app tarda: la animación de los logos la hace la app */
+  .logo .jr { width: 100%; margin-bottom: 9%; }
+  .logo .rs { width: 90.7%; }
+  @keyframes aparece { from { opacity: 0; } to { opacity: 1; } }
+  #cargando { animation: aparece .4s ease .9s both; }
+  html.claro body { background: #f4f5f7; color: #14171c; }
+  html.claro .logo img { filter: invert(1); }
+  html.claro .logo { filter: drop-shadow(0 6px 20px rgba(225,29,72,.28)); }
+  html.claro .barra { background: #e3e6eb; }
   @keyframes pop { 0% { opacity: 0; transform: scale(.4) rotate(-12deg); } 70% { opacity: 1; } 100% { opacity: 1; transform: none; } }
   @keyframes latido { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }
   @keyframes entra { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
-  h1 { font-size: 12.5px; font-weight: 600; letter-spacing: .42em; text-transform: uppercase; color: #8b93a1; margin: 20px 0 6px; animation: entra .5s ease both .6s; }
+  h1 { font-size: 12.5px; font-weight: 600; letter-spacing: .42em; text-transform: uppercase; color: #8b93a1; margin: 20px 0 6px; animation: aparece .4s ease .9s both; }
   p { color: #8b93a1; font-size: 14px; line-height: 1.5; margin: 6px 0; }
   .barra { width: 120px; height: 3px; border-radius: 3px; background: #262b34; margin: 22px auto 0; overflow: hidden; }
   .barra::after { content: ""; display: block; width: 40%; height: 100%; background: #e11d48; border-radius: 3px; animation: va 1s ease-in-out infinite; }
@@ -36,6 +43,7 @@
   a.btn.sec { background: #1e222a; border: 1px solid #262b34; font-weight: 650; font-size: 14.5px; }
   #err { color: #fca5a5; min-height: 1.4em; }
 </style>
+<script>(function(){var e='';try{e=JSON.parse(localStorage.getItem('tema'))||''}catch(x){}var h=new Date().getHours();if((e||(h>=7&&h<20?'claro':'oscuro'))==='claro')document.documentElement.classList.add('claro')})()</script>
 </head>
 <body>
 <div class="caja">
