@@ -95,16 +95,43 @@ function puente() {
   var q = {}; new URLSearchParams(location.search).forEach(function (v, k) { q[k] = v; });
   window.google = { script: { run: corredor(), host: { close: function () {} },
     url: { getLocation: function (cb) { cb({ parameter: q, parameters: {}, hash: '' }); } } } };
-  // Deja guardada la pantalla más nueva para la próxima vez que se abra
-  setTimeout(function () { llamar('_html', []).then(function (h) { try { localStorage.setItem('appHtml', h); } catch (e) {} }, function () {}); }, 4000);
+  // Busca versión nueva: a los 4 segundos, cada 10 minutos y al volver a la app. Si hay, la guarda y avisa "Actualización disponible".
+  function huella(s) { var h = 5381; for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return String(h) + ':' + s.length; }
+  var avisado = false, ultima = 0;
+  function aviso() {
+    if (avisado || !document.body) return; avisado = true;
+    var b = document.createElement('div');
+    b.setAttribute('style', 'position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 84px);transform:translateX(-50%) translateY(20px);opacity:0;' +
+      'z-index:100000;display:flex;align-items:center;gap:12px;padding:10px 10px 10px 16px;border-radius:999px;background:#14171c;color:#fff;' +
+      'box-shadow:0 10px 30px rgba(0,0,0,.35);border:1px solid rgba(225,29,72,.55);font:600 14px -apple-system,system-ui,sans-serif;' +
+      'white-space:nowrap;transition:transform .35s cubic-bezier(.2,1.2,.4,1),opacity .25s');
+    b.innerHTML = '<span>✨ Actualización disponible</span><button style="border:0;border-radius:999px;background:#e11d48;color:#fff;' +
+      'font:700 13.5px -apple-system,system-ui,sans-serif;padding:8px 14px;cursor:pointer">Actualizar</button>';
+    b.querySelector('button').onclick = function () { this.textContent = 'Actualizando…'; location.reload(); };
+    document.body.appendChild(b);
+    requestAnimationFrame(function () { requestAnimationFrame(function () { b.style.opacity = '1'; b.style.transform = 'translateX(-50%)'; }); });
+  }
+  function revisar() {
+    if (Date.now() - ultima < 60000) return; ultima = Date.now();
+    llamar('_html', []).then(function (h) {
+      if (!h) return;
+      try { localStorage.setItem('appHtml', h); } catch (e) {}
+      if (window.__VER && huella(h) !== window.__VER) aviso();
+    }, function () {});
+  }
+  setTimeout(revisar, 4000);
+  setInterval(revisar, 10 * 60000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) revisar(); });
 }
 
 function mostrar(html, cfg) {
   if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', function () { mostrar(html, cfg); }); return; }
+  var h0 = 5381; for (var i = 0; i < html.length; i++) h0 = ((h0 << 5) + h0 + html.charCodeAt(i)) | 0;   // huella de esta versión (igual que huella() en puente)
+  var ver = String(h0) + ':' + html.length;
   var extra = '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">' +
     '<meta name="theme-color" content="#0e1014"><link rel="manifest" href="manifest.webmanifest">' +
     '<link rel="apple-touch-icon" href="icono-180.png?v=3"><link rel="icon" type="image/png" href="favicon.png?v=3">' +
-    '<title>Entregas</title><script>window.__API=' + JSON.stringify(cfg) + ';(' + puente.toString() + ')();<\/script>';
+    '<title>Entregas</title><script>window.__API=' + JSON.stringify(cfg) + ';window.__VER=' + JSON.stringify(ver) + ';(' + puente.toString() + ')();<\/script>';
   html = html.replace(/<base[^>]*>/i, '').replace(/<head>/i, '<head>' + extra);
   document.open(); document.write(html); document.close();
 }
