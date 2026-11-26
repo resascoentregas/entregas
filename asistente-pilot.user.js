@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente Entregas → Pilot
 // @namespace    resascoentregas
-// @version      3.0
+// @version      3.1
 // @description  Hace en Pilot los pasos de cada entrega que marcás en la app Entregas (pre-entrega, controles, planificar, entregado, transferir a Azul, etiqueta). Con Pilot abierto, lo hace al instante (se fija cada 3 segundos si marcaste algo), y te avisa en la app cuando un legajo pasa a "Ok para entrega" o alguien deja un comentario.
 // @match        https://app.pilotsolution.com.ar/*
 // @noframes
@@ -24,7 +24,7 @@
   const YA_EN_PREENTREGA = ['en preentrega', 'en entrega', 'cierre de legajo'];
   const CADA = 60000;   // revisión completa de respaldo, cada 1 minuto
   const RAPIDO = 3000;  // cada 3 segundos pregunta si marcaste algo en la app (es instantáneo)
-  const VER = '3.0', MAX_INTENTOS = 5;
+  const VER = '3.1', MAX_INTENTOS = 5;
   let corriendo = false;   // no arranca otra vuelta mientras termina la anterior
 
   /* ---------- Conexión con la app Entregas ---------- */
@@ -135,11 +135,12 @@
       lista.length + ' pendiente' + (lista.length > 1 ? 's' : '') + (nTrab ? ' · ' + nTrab + ' necesita' + (nTrab > 1 ? 'n' : '') + ' tu ok' : on ? ' · se hacen solos' : '');
     panel.innerHTML = `<div class="cab"><b>Entregas → Pilot</b><label class="sw" title="Con Pilot abierto, hace solo lo que marcás en la app">Auto<input type="checkbox" id="ae-auto" ${on ? 'checked' : ''}><span></span></label></div>` +
       `<div class="sub ${e && e.mal ? 'mal' : lista.length ? '' : 'ok'}">${sub}${cargando && lista.length ? ' · actualizando…' : ''}</div>` +
-      `<div class="lnk"><button id="ae-ya">↻ Revisar ahora</button>${nTrab ? '<button id="ae-reint">Reintentar frenados</button>' : ''}</div>` +
+      `<div class="lnk"><button id="ae-ya">↻ Revisar ahora</button><button id="ae-ped" title="Busca tanque lleno, polarizado y accesorios en los comentarios de los legajos">🧾 Buscar pedidos</button>${nTrab ? '<button id="ae-reint">Reintentar frenados</button>' : ''}</div>` +
       (lista.length ? lista.map(item).join('') : cargando ? '' : '<div class="nada">Nada pendiente 👍</div>') +
       (hist.length ? '<details><summary>Últimos movimientos ›</summary><div class="hist">' + hist.slice(0, 8).map(esc).join('<br>') + '</div></details>' : '');
     panel.querySelector('#ae-auto').onchange = x => { GM_setValue('auto29', x.target.checked); pintarBtn(); pintarPanel(); reportar(); if (x.target.checked) setTimeout(autoCiclo, 500); };
     panel.querySelector('#ae-ya').onclick = () => { GM_setValue('autoLock', 0); estado('Revisando…'); pintarPanel(true); setTimeout(autoCiclo, 200); };
+    panel.querySelector('#ae-ped').onclick = e => { e.target.textContent = '🧾 Buscando…'; e.target.disabled = true; revisarPedidos(true).finally(() => pintarPanel()); };
     const ri = panel.querySelector('#ae-reint'); if (ri) ri.onclick = () => { GM_setValue('esperanVos', {}); GM_setValue('autoLock', 0); estado('Reintentando…'); pintarPanel(true); setTimeout(autoCiclo, 300); };
   }
   async function cargar() {
@@ -443,6 +444,63 @@
     } catch (e) { GM_setValue('vigLock', 0); /* reintenta en el próximo ciclo */ }
   }
 
+  /* ---------- Pedidos del legajo (3.1): tanque lleno, polarizado y accesorios ----------
+     Lee TODOS los comentarios de los legajos de los autos que todavía no se entregaron (también los viejos)
+     y le manda a la app lo que encuentra. Solo lee Pilot, no cambia nada. Cada 2 horas. */
+  const PEDIDOS = [
+    ['tanque', /tanque\s*(lleno|completo|full)|full\s*tank|llenar\s*(el\s*)?tanque|cargar?\s*(el\s*)?tanque|carga\s*(de\s*)?(nafta|combustible)|(nafta|combustible|gasoil)\s*(lleno|completo|full)|\bnafta\b/],
+    ['polarizado', /polariz/],
+    ['accesorio', /accesorio|cubre\s*alfombra|alfombra|enganche|estribo|barras?\s*(de\s*techo|antivuelco|portaequipaje)|antivuelco|lona\s*(maritima|marinera)?|cobertor|protector\s*de\s*(caja|carter|batea|caja de carga)|cubre\s*batea|jaula|cupula|sensor(es)?\s*de\s*estacionamiento|camara\s*(de\s*)?(retroceso|trasera)|deflector|portaequipaje|bola\s*de\s*enganche|kit\s*de\s*seguridad|matafuego/]
+  ];
+  const NIEGA = /\b(sin|no\s+(lleva|quiere|va|tiene|lleve|quiso)|no)\s+(\S+\s+){0,2}$/;
+  function buscarPedidos(texto) {
+    const n = norm(texto), out = [];
+    for (const [tipo, re] of PEDIDOS) {
+      const m = n.match(re); if (!m) continue;
+      if (NIEGA.test(n.slice(Math.max(0, m.index - 25), m.index))) continue;   // "sin polarizado", "no lleva accesorios"
+      out.push(tipo === 'accesorio' ? 'accesorios' : tipo);
+    }
+    return out;
+  }
+  function textosLegajo(html) {
+    const d = new DOMParser().parseFromString('<div>' + html + '</div>', 'text/html');
+    return [...d.querySelectorAll('.todo-tasklist-item')].map(it => {
+      const cuerpo = it.querySelector('.pilot-event-list-item'), ctl = it.querySelector('.todo-tasklist-controls');
+      return { texto: cuerpo ? limpio(cuerpo.innerHTML.replace(/<br\s*\/?>/gi, ' · ')) : '',
+        cuando: ctl ? limpio((ctl.querySelector('.pull-left') || {}).textContent) : '', quien: ctl ? limpio((ctl.querySelector('.pull-right') || {}).textContent) : '' };
+    }).filter(x => x.texto);   // solo lo que alguien escribió (comentarios, notas), no los cambios automáticos
+  }
+  async function revisarPedidos(forzar) {
+    if (!cfg() || /\/login|logout/.test(location.pathname) || !W.$ || !W.gl_user_id) return;
+    if (!forzar && Date.now() - GM_getValue('pedLock', 0) < 2 * 3600000) return;   // cada 2 horas (entre todas las pestañas)
+    GM_setValue('pedLock', Date.now());
+    let autos; try { autos = await api('getAutosPilot'); } catch (e) { GM_setValue('pedLock', 0); return; }
+    const encontrados = []; let leidos = 0;
+    for (const a of autos) {
+      while (corriendo) await esperar(5000);   // primero lo que marcás en la app
+      try {
+        const filas = (await buscarLegajos(a)).slice(0, 2);
+        for (const f of filas) {
+          const id = datosFila(f).adminFileId, vistos = {};
+          for (let pag = 1; pag <= 6; pag++) {
+            const r = await W.$.post('/adminfileContext/services/get.events.list.php', { admin_file_id: id, page: pag, show_historical_events: true });
+            const items = textosLegajo((r && r.data) || ''); let nuevos = 0;
+            for (const x of items) {
+              const k = x.cuando + '|' + x.texto.slice(0, 80); if (vistos[k]) continue; vistos[k] = 1; nuevos++;
+              buscarPedidos(x.texto).forEach(tipo => encontrados.push({ vin: a.vin, cliente: a.cliente, tipo, texto: x.texto.slice(0, 400), quien: x.quien, cuando: x.cuando }));
+            }
+            if (!nuevos) break;   // no hay más páginas
+          }
+          leidos++;
+        }
+      } catch (e) { /* ese legajo se revisa en la próxima vuelta */ }
+      await esperar(400);   // sin apurar a Pilot
+    }
+    try { const n = await api('pilotPedidos', [encontrados]);
+      historial('🧾 Revisé ' + leidos + ' legajos: ' + (n ? n + ' auto' + (n > 1 ? 's' : '') + ' con pedidos nuevos (tanque, polarizado o accesorios)' : 'nada nuevo'));
+    } catch (e) { GM_setValue('pedLock', 0); }
+  }
+
   /* ---------- Arranque ---------- */
   const latir = () => api('pilotLatido').catch(() => {});   // la app muestra "● Pilot" en verde mientras esto llegue
   if (!/login/.test(location.host + location.pathname)) {   // arranca aunque todavía no esté el código: cuando lo cargues, sigue solo
@@ -458,6 +516,7 @@
     // Al volver a la pestaña de Pilot, se fija en el momento (sin esperar los 10 segundos)
     document.addEventListener('visibilitychange', () => { if (!document.hidden) autoCiclo(); });
     window.addEventListener('focus', () => autoCiclo());
-    setTimeout(vigilar, 40000); setInterval(vigilar, 10 * 60000);   // avisos de Pilot a la app, cada 10 minutos
+    setTimeout(vigilar, 40000); setInterval(vigilar, 10 * 60000);
+    setTimeout(revisarPedidos, 90000); setInterval(revisarPedidos, 15 * 60000);   // pedidos del legajo: cada 2 horas   // avisos de Pilot a la app, cada 10 minutos
   }
 })();
