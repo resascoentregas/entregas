@@ -61,6 +61,7 @@
 <script>
 /* La pantalla de la app vive en Google (Apps Script) pero se muestra acá, sin el cartel de Google.
    Google queda solo como motor: cada pedido viaja con la clave secreta guardada en este aparato. */
+var WRAP_VER = '6';
 var VIEJA = 'https://script.google.com/macros/s/AKfycbzn7PJlJKF0K5es5lEZd-x_ii8fZ2XYfdUVibRvcqHDJzjdB6Ra9vowjKOc5-fPcKxKGw/exec';
 var esPC = window.innerWidth >= 1000 && !/Android|iPhone|iPad/i.test(navigator.userAgent);
 document.getElementById('vieja').href = VIEJA + '?vista=' + (esPC ? 'pc' : 'cel');
@@ -97,30 +98,48 @@ function puente() {
     url: { getLocation: function (cb) { cb({ parameter: q, parameters: {}, hash: '' }); } } } };
   // Busca versión nueva: a los 4 segundos, cada 10 minutos y al volver a la app. Si hay, la guarda y avisa "Actualización disponible".
   function huella(s) { var h = 5381; for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return String(h) + ':' + s.length; }
-  var avisado = false, ultima = 0;
-  function aviso() {
-    if (avisado || !document.body) return; avisado = true;
-    var b = document.createElement('div');
-    b.setAttribute('style', 'position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 84px);transform:translateX(-50%) translateY(20px);opacity:0;' +
-      'z-index:100000;display:flex;align-items:center;gap:12px;padding:10px 10px 10px 16px;border-radius:999px;background:#14171c;color:#fff;' +
-      'box-shadow:0 10px 30px rgba(0,0,0,.35);border:1px solid rgba(225,29,72,.55);font:600 14px -apple-system,system-ui,sans-serif;' +
-      'white-space:nowrap;transition:transform .35s cubic-bezier(.2,1.2,.4,1),opacity .25s');
-    b.innerHTML = '<span>✨ Actualización disponible</span><button style="border:0;border-radius:999px;background:#e11d48;color:#fff;' +
-      'font:700 13.5px -apple-system,system-ui,sans-serif;padding:8px 14px;cursor:pointer">Actualizar</button>';
-    b.querySelector('button').onclick = function () { this.textContent = 'Actualizando…'; location.reload(); };
-    document.body.appendChild(b);
-    requestAnimationFrame(function () { requestAnimationFrame(function () { b.style.opacity = '1'; b.style.transform = 'translateX(-50%)'; }); });
+  var ultima = 0;
+  // Versión nueva: tapa toda la pantalla y no deja seguir hasta tocar "Actualizar ahora"
+  function bloquear() {
+    if (document.getElementById('__upd') || !document.body) return;
+    var o = document.createElement('div'); o.id = '__upd';
+    o.setAttribute('style', 'position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:24px;' +
+      'background:rgba(10,12,16,.94);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);font-family:-apple-system,system-ui,sans-serif;' +
+      'opacity:0;transition:opacity .3s');
+    o.innerHTML = '<div style="max-width:340px;width:100%;text-align:center;color:#fff;background:#14171c;border:1px solid rgba(225,29,72,.5);' +
+      'border-radius:24px;padding:28px 22px;box-shadow:0 20px 60px rgba(0,0,0,.5)">' +
+      '<div style="font-size:44px;line-height:1">✨</div>' +
+      '<div style="font-size:20px;font-weight:800;margin:12px 0 6px">Hay una versión nueva</div>' +
+      '<div style="font-size:14.5px;color:#a3aab6;line-height:1.5">Para seguir usando la app tenés que actualizar. Tarda unos segundos.</div>' +
+      '<button style="display:block;width:100%;margin-top:20px;padding:15px;border:0;border-radius:16px;background:#e11d48;color:#fff;' +
+      'font:800 16px -apple-system,system-ui,sans-serif;cursor:pointer">Actualizar ahora</button></div>';
+    o.querySelector('button').onclick = function () {
+      this.textContent = 'Actualizando…'; this.disabled = true;
+      location.replace(location.pathname + '?' + (location.search.indexOf('abrir') >= 0 ? 'abrir=1&' : '') + 'u=' + Date.now());
+    };
+    ['click', 'touchstart', 'keydown', 'wheel'].forEach(function (ev) { o.addEventListener(ev, function (e) { e.stopPropagation(); }, true); });
+    document.body.appendChild(o);
+    requestAnimationFrame(function () { o.style.opacity = '1'; });
+    try { document.activeElement && document.activeElement.blur(); } catch (e) {}
+  }
+  // ¿Cambió esta página de GitHub? (WRAP_VER es el número de versión escrito en la página)
+  function paginaNueva() {
+    return fetch(location.pathname + '?nv=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.text(); })
+      .then(function (t) { var m = t.match(/var WRAP_VER = '([^']+)'/); if (!m || !window.__WRAP || m[1] === window.__WRAP) return false;
+        try { if (sessionStorage.getItem('updWrap') === m[1]) return false; sessionStorage.setItem('updWrap', m[1]); } catch (e) {}   // si ya se intentó, no trabo de nuevo
+        return true; }, function () { return false; });
   }
   function revisar() {
-    if (Date.now() - ultima < 60000) return; ultima = Date.now();
+    if (Date.now() - ultima < 30000) return; ultima = Date.now();
     llamar('_html', []).then(function (h) {
       if (!h) return;
       try { localStorage.setItem('appHtml', h); } catch (e) {}
-      if (window.__VER && huella(h) !== window.__VER) aviso();
+      if (window.__VER && huella(h) !== window.__VER) { var hv = huella(h); try { if (sessionStorage.getItem('updHtml') === hv) return; sessionStorage.setItem('updHtml', hv); } catch (e) {} bloquear(); }
     }, function () {});
+    paginaNueva().then(function (n) { if (n) bloquear(); });
   }
-  setTimeout(revisar, 4000);
-  setInterval(revisar, 10 * 60000);
+  setTimeout(revisar, 3000);
+  setInterval(revisar, 5 * 60000);
   document.addEventListener('visibilitychange', function () { if (!document.hidden) revisar(); });
 }
 
@@ -131,7 +150,7 @@ function mostrar(html, cfg) {
   var extra = '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">' +
     '<meta name="theme-color" content="#0e1014"><link rel="manifest" href="manifest.webmanifest">' +
     '<link rel="apple-touch-icon" href="icono-180.png?v=3"><link rel="icon" type="image/png" href="favicon.png?v=3">' +
-    '<title>Entregas</title><script>window.__API=' + JSON.stringify(cfg) + ';window.__VER=' + JSON.stringify(ver) + ';(' + puente.toString() + ')();<\/script>';
+    '<title>Entregas</title><script>window.__API=' + JSON.stringify(cfg) + ';window.__VER=' + JSON.stringify(ver) + ';window.__WRAP=' + JSON.stringify(WRAP_VER) + ';(' + puente.toString() + ')();<\/script>';
   html = html.replace(/<base[^>]*>/i, '').replace(/<head>/i, '<head>' + extra);
   document.open(); document.write(html); document.close();
 }
@@ -163,6 +182,7 @@ document.getElementById('entrar').onclick = function () {
 var cfg = parsear(location.hash.indexOf('#c=') === 0 ? location.hash : '');
 if (cfg) { guardar('cfgApi', JSON.stringify(cfg)); history.replaceState(null, '', location.pathname); }
 else { try { cfg = JSON.parse(leer('cfgApi') || 'null'); } catch (e) { cfg = null; } }
+if (/[?&]u=\d/.test(location.search)) history.replaceState(null, '', location.pathname + (location.search.indexOf('abrir') >= 0 ? '?abrir=1' : ''));
 if (cfg) arrancar(cfg); else formulario();
 </script>
 </body>
