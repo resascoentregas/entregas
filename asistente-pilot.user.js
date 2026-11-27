@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente Entregas → Pilot
 // @namespace    resascoentregas
-// @version      3.3
+// @version      3.4
 // @description  Hace en Pilot los pasos de cada entrega que marcás en la app Entregas (pre-entrega, controles, planificar, entregado, transferir a Azul, etiqueta). Con Pilot abierto, lo hace al instante (se fija cada 3 segundos si marcaste algo), y te avisa en la app cuando un legajo pasa a "Ok para entrega" o alguien deja un comentario.
 // @match        https://app.pilotsolution.com.ar/*
 // @noframes
@@ -51,6 +51,7 @@
   const QUE = {
     preentrega: 'Pasar a pre-entrega',
     preok: 'Pre-entrega OK + fecha en Controles',
+    deshacerPreok: 'Deshacer Pre-entrega OK (reabrir tarea y sacar la fecha de Controles)',
     cita: 'Planificar la entrega (Daniel Diaz · Casa Central)',
     entregado: 'Entregado → transferir a Azul + etiqueta Entregado'
   };
@@ -71,7 +72,7 @@
   function estado(txt, mal) { GM_setValue('estado', { t: hora(), txt, mal: !!mal }); }
 
   /* ---------- Panel (2.9: minimalista, abre al instante con lo último que se sabe) ---------- */
-  const CORTO = { preentrega: 'Pasar a pre-entrega', preok: 'Pre-entrega OK', cita: 'Planificar entrega', entregado: 'Entrega realizada' };
+  const CORTO = { preentrega: 'Pasar a pre-entrega', preok: 'Pre-entrega OK', deshacerPreok: 'Deshacer Pre-entrega OK', cita: 'Planificar entrega', entregado: 'Entrega realizada' };
   const css = document.createElement('style');
   css.textContent = `
   #ae-btn{position:fixed;right:16px;bottom:16px;z-index:99999;display:flex;align-items:center;gap:7px;background:#fff;color:#111827;border:1px solid #e5e7eb;border-radius:999px;padding:8px 13px;font:600 13px system-ui,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.12);cursor:grab;touch-action:none;user-select:none}
@@ -313,6 +314,36 @@
         hecho('control'); paso('✔ Controles: Pre Entrega ok ' + t.fecha);
       }
     }
+    // 3.4: destildaste "Pre-entrega OK" en la app → reabrir la tarea y sacar la fecha de Controles (con los botones de Pilot)
+    if (t.accion === 'deshacerPreok') {
+      if (!preguntar('¿Deshacer "Pre-entrega OK" en el legajo de ' + t.cliente + '?\n\nSe destilda la tarea "Pre entrega ok" y se borra la fecha "Pre Entrega ok" de Controles.'))
+        throw new NecesitaVos('deshacer cancelado');
+      const x = tarea('Pre entrega ok');
+      if (!x) paso('• La tarea "Pre entrega ok" no está en este legajo');
+      else if (!x.hecha) paso('• La tarea "Pre entrega ok" ya estaba sin tildar');
+      else {
+        const inp = d.getElementById('chk_tarea_' + x.id) || d.querySelector('[id^="chk_tarea_"][data-id="' + x.id + '"]');
+        (inp.closest('label') || inp).click();
+        for (let i = 0; i < 16 && inp.checked; i++) await esperar(500);
+        if (inp.checked) throw new NecesitaVos('Pilot no dejó destildar la tarea "Pre entrega ok": destildala a mano y tocá "Ya está hecho"');
+        paso('✔ Destildé "Pre entrega ok"');
+      }
+      const filaPre = () => { for (const tb of d.querySelectorAll('table')) { const rs = [...tb.rows]; if (!rs.length) continue;
+          const cab = norm(rs[0].innerText); if (!/control/.test(cab) || !/fecha/.test(cab)) continue;
+          return rs.slice(1).find(r => /pre[\s-]*entrega\s*ok/.test(norm(r.cells[0] && r.cells[0].innerText))) || null; } return undefined; };
+      let fp = filaPre();
+      if (fp === undefined) { const tb = d.getElementById('tab-entregas'); if (tb) tb.click(); for (let i = 0; i < 20 && (fp = filaPre()) === undefined; i++) await esperar(500); }
+      if (!fp) paso('• Controles no tenía "Pre Entrega ok"');
+      else {
+        const bor = [...fp.querySelectorAll('a,button,i,span')].find(e => /elimin|borr|quitar|delete|remove|trash|times|close/i.test((e.title || '') + ' ' + (e.getAttribute('data-original-title') || '') + ' ' + e.className + ' ' + (e.getAttribute('onclick') || '')));
+        fp.style.outline = '3px solid #e11d48';
+        if (!bor) throw new NecesitaVos('no encontré el botón para borrar "Pre Entrega ok" en Controles (lo marqué en rojo): borralo a mano y tocá "Ya está hecho"');
+        (bor.closest('a,button') || bor).click(); paso('• Toqué borrar en Controles: si Pilot pregunta, confirmá');
+        for (let i = 0; i < 60 && filaPre(); i++) await esperar(500);
+        if (filaPre()) throw new NecesitaVos('la fecha "Pre Entrega ok" sigue en Controles: borrala a mano y tocá "Ya está hecho"');
+        paso('✔ Saqué "Pre Entrega ok" de Controles');
+      }
+    }
     if (t.accion === 'cita') {
       const yaPlan = textoEntregas.indexOf('no hay planificacion de entrega') < 0;   // 3.0: si en la app cambiaste el día u hora (t.cambio), se reprograma en Pilot
       if (yaHecho('plan') || (yaPlan && !t.cambio)) paso('• Ya había una entrega planificada')
@@ -359,6 +390,7 @@
     });
   }
   async function hacerSolo(t) {
+    if (t.accion === 'deshacerPreok') throw new NecesitaVos('para deshacer el Pre-entrega OK tocá "Hacer" y confirmalo');
     const filas = await buscarLegajos(t);
     if (!filas.length) throw new NecesitaVos('no encontré el legajo: abrilo con "Hacer"');
     if (filas.length > 1) throw new NecesitaVos('hay ' + filas.length + ' legajos posibles: elegí el correcto con "Hacer"');

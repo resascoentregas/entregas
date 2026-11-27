@@ -42,6 +42,10 @@
                   font-weight: 750; font-size: 16px; text-decoration: none; font-family: inherit; }
   a.btn.sec { background: #1e222a; border: 1px solid #262b34; font-weight: 650; font-size: 14.5px; }
   #err { color: #fca5a5; min-height: 1.4em; }
+  /* Sin pantallazos: mientras carga solo se ve el fondo; la animación de logos la hace la app */
+  html { background: #0e1014; } html.claro { background: #f4f5f7; }
+  body:not(.form) .logo, body:not(.form) h1 { visibility: hidden; }
+  #cargando { animation: aparece .4s ease 2.5s both; }
 </style>
 <script>(function(){var e='';try{e=JSON.parse(localStorage.getItem('tema'))||''}catch(x){}var h=new Date().getHours();if((e||(h>=7&&h<20?'claro':'oscuro'))==='claro')document.documentElement.classList.add('claro')})()</script>
 </head>
@@ -61,7 +65,7 @@
 <script>
 /* La pantalla de la app vive en Google (Apps Script) pero se muestra acá, sin el cartel de Google.
    Google queda solo como motor: cada pedido viaja con la clave secreta guardada en este aparato. */
-var WRAP_VER = '6';
+var WRAP_VER = '7';
 var VIEJA = 'https://script.google.com/macros/s/AKfycbzn7PJlJKF0K5es5lEZd-x_ii8fZ2XYfdUVibRvcqHDJzjdB6Ra9vowjKOc5-fPcKxKGw/exec';
 var esPC = window.innerWidth >= 1000 && !/Android|iPhone|iPad/i.test(navigator.userAgent);
 document.getElementById('vieja').href = VIEJA + '?vista=' + (esPC ? 'pc' : 'cel');
@@ -165,6 +169,7 @@ function arrancar(cfg) {
 }
 
 function formulario(msg) {
+  document.body.classList.add('form');
   document.getElementById('cargando').style.display = 'none';
   document.getElementById('form').style.display = 'block';
   document.getElementById('err').textContent = msg || '';
