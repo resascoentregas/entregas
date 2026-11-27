@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Asistente Entregas → WhatsApp (garantías)
 // @namespace    resascoentregas
-// @version      1.0
+// @version      1.1
 // @description  Manda sola la felicitación con la foto de garantía por WhatsApp Web a los clientes entregados cuya cita se mandó desde la PC.
 // @match        https://web.whatsapp.com/*
 // @noframes
@@ -17,7 +17,7 @@
 
 (function () {
   'use strict';
-  const VER = '1.0';
+  const VER = '1.1';
   const CADA = 60000;              // revisa cada 1 minuto si hay garantías para mandar
   const HORARIO = [8, 21];         // solo manda de 8 a 21 hs (nunca de noche)
   const espera = ms => new Promise(r => setTimeout(r, ms));
@@ -56,7 +56,8 @@
       return;
     }
     panel.innerHTML = '<b>🛡️ Garantías · WhatsApp</b> <small>v' + VER + '</small><div class="e ' + (mal ? 'mal' : '') + '">' + (on() ? '' : '⏸ Pausado · ') + esc(txt) + '</div>' +
-      '<button id="aew-ya">Revisar ahora</button><button class="g" id="aew-on">' + (on() ? 'Pausar' : 'Activar') + '</button>';
+      '<button id="aew-ya">Revisar ahora</button><button class="g" id="aew-on">' + (on() ? 'Pausar' : 'Activar') + '</button><button class="g" id="aew-pr">Probar con mi número</button>';
+    panel.querySelector('#aew-pr').onclick = probar;
     panel.querySelector('#aew-ya').onclick = () => ciclo(true);
     panel.querySelector('#aew-on').onclick = () => { GM_setValue('on', !on()); estado(on() ? 'Activo' : 'Pausado'); };
   }
@@ -99,6 +100,7 @@
   }
   async function terminar(job, ok, motivo) {
     GM_deleteValue('job');
+    if (job.prueba) return estado(ok ? '✔ Prueba enviada: fijate en tu chat' : '⚠ Prueba: ' + motivo, !ok);
     const h = GM_getValue('hechos', {}); h[job.vin] = Date.now(); GM_setValue('hechos', h);
     try { await api('marcarGarantiaWa', [job.vin, ok, 'pc', motivo || '']); } catch (e) {}
     estado(ok ? '✔ Garantía enviada a ' + job.cliente : '⚠ ' + job.cliente + ': ' + motivo, !ok);
@@ -128,6 +130,17 @@
       location.href = 'https://web.whatsapp.com/send?phone=' + x.tel;
     } catch (e) { estado(e.message, true); }
     finally { corriendo = false; }
+  }
+  /* Prueba: manda la garantía a tu propio número (no anota nada en la app) */
+  function probar() {
+    const v = prompt('Tu número de WhatsApp para la prueba (ej. 2954 123456):', GM_getValue('miNum', '')); if (!v) return;
+    let d = v.replace(/\D/g, '').replace(/^0+/, ''); if (d.indexOf('54') === 0) d = d.slice(2); if (d[0] === '9') d = d.slice(1);
+    for (const n of [2, 3, 4]) if (d.length === 12 && d.substr(n, 2) === '15') { d = d.slice(0, n) + d.slice(n + 2); break; }
+    if (d.length !== 10) return alert('Poné el número con característica, por ejemplo 2954 123456');
+    GM_setValue('miNum', v);
+    GM_setValue('job', { prueba: true, vin: 'PRUEBA', cliente: 'vos (prueba)', tel: '549' + d, t: Date.now(),
+      texto: 'Buenas tardes *Cliente de prueba* 🎉 ¡Felicitaciones por tu nuevo *Jeep Compass*! Te dejamos la información de la *garantía* de tu 0km 🛡️.\n\n(Esto es una prueba del asistente de garantías)' });
+    estado('Prueba: abriendo tu chat…'); location.href = 'https://web.whatsapp.com/send?phone=549' + d;
   }
   estado(cfg() ? 'Arrancando…' : '');
   setTimeout(ciclo, GM_getValue('job', null) ? 4000 : 15000);
