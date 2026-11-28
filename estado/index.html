@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-<title>Estado de autos</title>
-<link rel="apple-touch-icon" href="icono-180.png?v=4">
-<link rel="icon" type="image/png" href="favicon.png?v=4">
-<link rel="manifest" href="manifest.webmanifest">
+<title>CeroKm Estados</title>
+<link rel="apple-touch-icon" href="icono-180.png?v=5">
+<link rel="icon" type="image/png" href="favicon.png?v=5">
+<link rel="manifest" href="manifest.webmanifest?v=5">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Estado autos">
+<meta name="apple-mobile-web-app-title" content="CeroKm Estados">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0e1014">
 <style>
@@ -126,9 +126,9 @@ function huellaTop(x) { var h = 5381; for (var i = 0; i < x.length; i++) h = ((h
 function mostrar(html) {
   if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', function () { mostrar(html); }); return; }
   var extra = '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">' +
-    '<meta name="theme-color" content="#0e1014"><link rel="manifest" href="manifest.webmanifest">' +
-    '<link rel="apple-touch-icon" href="icono-180.png?v=4"><link rel="icon" type="image/png" href="favicon.png?v=4">' +
-    '<title>Estado de autos</title><script>window.__API=' + JSON.stringify(API) + ';window.__VER=' + JSON.stringify(huellaTop(html)) + ';window.__WRAP=' + JSON.stringify(WRAP_VER) + ';(' + puente.toString() + ')();<\/script>';
+    '<meta name="theme-color" content="#0e1014"><link rel="manifest" href="manifest.webmanifest?v=5">' +
+    '<link rel="apple-touch-icon" href="icono-180.png?v=5"><link rel="icon" type="image/png" href="favicon.png?v=5">' +
+    '<title>CeroKm Estados</title><script>window.__API=' + JSON.stringify(API) + ';window.__VER=' + JSON.stringify(huellaTop(html)) + ';window.__WRAP=' + JSON.stringify(WRAP_VER) + ';(' + puente.toString() + ')();<\/script>';
   html = html.replace(/<base[^>]*>/i, '').replace(/<head>/i, '<head>' + extra);
   document.open(); document.write(html); document.close();
 }
