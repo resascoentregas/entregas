@@ -55,8 +55,8 @@
   <h1>Entregas</h1>
   <div id="cargando"><div class="barra"></div></div>
   <div id="form">
-    <p>Pegá el código de acceso que te llegó por mail.</p>
-    <input id="cod" placeholder="Código de acceso" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <p>Poné tu código personal (o pegá el código largo que te llegó por mail).</p>
+    <input id="cod" placeholder="Código personal" autocomplete="off" autocapitalize="off" spellcheck="false">
     <button id="entrar">Entrar</button>
     <p id="err"></p>
     <a class="btn sec" id="vieja" href="#">Entrar con mi cuenta de Google (como antes)</a>
@@ -65,7 +65,8 @@
 <script>
 /* La pantalla de la app vive en Google (Apps Script) pero se muestra acá, sin el cartel de Google.
    Google queda solo como motor: cada pedido viaja con la clave secreta guardada en este aparato. */
-var WRAP_VER = '7';
+var WRAP_VER = '8';
+var API_ID = 'AKfycbwMccMP6rNIBN-iutoZVSfVqYasFBMve_L3eUG1JDRx5FhUtV1idSD72ImTmHms3ooa2w';
 var VIEJA = 'https://script.google.com/macros/s/AKfycbzn7PJlJKF0K5es5lEZd-x_ii8fZ2XYfdUVibRvcqHDJzjdB6Ra9vowjKOc5-fPcKxKGw/exec';
 var esPC = window.innerWidth >= 1000 && !/Android|iPhone|iPad/i.test(navigator.userAgent);
 document.getElementById('vieja').href = VIEJA + '?vista=' + (esPC ? 'pc' : 'cel');
@@ -132,13 +133,19 @@ function puente() {
         try { if (sessionStorage.getItem('updWrap') === m[1]) return false; sessionStorage.setItem('updWrap', m[1]); } catch (e) {}   // si ya se intentó, no trabo de nuevo
         return true; }, function () { return false; });
   }
+  function conHtml(h, v) {
+    if (!h) return;
+    try { localStorage.setItem('appHtml', h); if (v) localStorage.setItem('appVer', v); } catch (e) {}
+    if (window.__VER && huella(h) !== window.__VER) { var hv = huella(h); try { if (sessionStorage.getItem('updHtml') === hv) return; sessionStorage.setItem('updHtml', hv); } catch (e) {} bloquear(); }
+  }
   function revisar() {
     if (Date.now() - ultima < 30000) return; ultima = Date.now();
-    llamar('_html', []).then(function (h) {
-      if (!h) return;
-      try { localStorage.setItem('appHtml', h); } catch (e) {}
-      if (window.__VER && huella(h) !== window.__VER) { var hv = huella(h); try { if (sessionStorage.getItem('updHtml') === hv) return; sessionStorage.setItem('updHtml', hv); } catch (e) {} bloquear(); }
-    }, function () {});
+    // Primero pide solo la huella (unos bytes); la pantalla entera (~350 KB) se baja únicamente si hay versión nueva
+    llamar('_ver', []).then(function (v) {
+      var ant = null; try { ant = localStorage.getItem('appVer'); } catch (e) {}
+      if (v && ant === v) return;
+      return llamar('_html', []).then(function (h) { conHtml(h, v); });
+    }, function () { return llamar('_html', []).then(function (h) { conHtml(h, ''); }); }).catch(function () {});
     paginaNueva().then(function (n) { if (n) bloquear(); });
   }
   setTimeout(revisar, 3000);
@@ -174,8 +181,20 @@ function formulario(msg) {
   document.getElementById('form').style.display = 'block';
   document.getElementById('err').textContent = msg || '';
 }
+// Código personal corto: lo canjea por la clave del aparato (5 intentos fallidos = 30 minutos bloqueado)
+function entrarConPin(pin) {
+  var b = document.getElementById('entrar'); b.disabled = true; b.textContent = 'Entrando…'; document.getElementById('err').textContent = '';
+  fetch('https://script.google.com/macros/s/' + API_ID + '/exec', { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ fn: '_pin', args: [pin] }) })
+    .then(function (r) { return r.json(); })
+    .then(function (j) { if (!j.ok) throw new Error(j.e); var c = { u: API_ID, k: j.r }; guardar('cfgApi', JSON.stringify(c));
+      document.getElementById('form').style.display = 'none'; document.getElementById('cargando').style.display = 'block'; arrancar(c); })
+    .catch(function (e) { b.disabled = false; b.textContent = 'Entrar'; document.getElementById('err').textContent = (e && e.message) || 'No se pudo conectar.'; });
+}
+document.getElementById('cod').addEventListener('keydown', function (e) { if (e.key === 'Enter') document.getElementById('entrar').click(); });
 document.getElementById('entrar').onclick = function () {
-  var cfg = parsear(document.getElementById('cod').value);
+  var txt = document.getElementById('cod').value.trim(), cfg = parsear(txt);
+  if (!cfg && /^[A-Za-z0-9]{4,20}$/.test(txt)) { entrarConPin(txt); return; }
   if (!cfg) { document.getElementById('err').textContent = 'Ese código no parece correcto.'; return; }
   guardar('cfgApi', JSON.stringify(cfg));
   document.getElementById('form').style.display = 'none'; document.getElementById('cargando').style.display = 'block';
