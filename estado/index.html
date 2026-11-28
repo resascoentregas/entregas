@@ -29,20 +29,28 @@
   .barra { width: 120px; height: 3px; border-radius: 3px; background: #262b34; margin: 22px auto 0; overflow: hidden; }
   .barra::after { content: ""; display: block; width: 40%; height: 100%; background: #e11d48; border-radius: 3px; animation: va 1s ease-in-out infinite; }
   @keyframes va { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+  .ck { font-size: 46px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; text-shadow: 0 6px 28px rgba(225,29,72,.45); animation: ckIn .38s cubic-bezier(.2,1.25,.4,1) both; }
+  .ck b { background: linear-gradient(135deg,#ff4d6d,#c8102e); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .ck-sub { font-size: 12px; letter-spacing: .42em; text-transform: uppercase; color: #8b93a1; margin-top: 8px; padding-left: .42em; animation: entra .4s ease .15s both; }
+  .ck-by { position: fixed; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom) + 28px); display: flex; flex-direction: column; align-items: center; gap: 5px;
+           font-size: 10px; letter-spacing: .22em; text-transform: uppercase; color: #8b93a1; animation: entra .4s ease .25s both; }
+  .ck-by span { font-size: 17px; letter-spacing: 0; text-transform: none; color: #eceef2; font-weight: 300; } .ck-by span b { font-weight: 800; }
+  @keyframes ckIn { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: none; } }
   button { margin-top: 16px; padding: 12px 20px; border-radius: 12px; border: 0; background: #e11d48; color: #fff; font-weight: 700; font-size: 15px; }
 </style>
 </head>
 <body>
 <div class="caja">
-  <div class="logo"><img class="jr" src="../jeepram.png" alt="Jeep RAM"><img class="rs" src="../resasco_txt.png" alt="Resasco"></div>
-  <h1>Estado de los autos · Jeep RAM</h1>
+  <div class="ck"><b>Cero</b>Km</div>
+  <div class="ck-sub">Estados</div>
   <div id="cargando"><div class="barra"></div></div>
   <div id="error" style="display:none"><p>No se pudo cargar. Revisá internet.</p><button onclick="location.reload()">Reintentar</button></div>
 </div>
+<div class="ck-by">creado por<span><b>DENK</b>apps</span></div>
 <script>
 /* Link para compartir (solo ver). Muestra la pantalla de la app sin pasar por la página de Google,
    así no aparece el cartel "Un usuario de Google Apps Script creó esta aplicación". */
-var WRAP_VER = '5';
+var WRAP_VER = '6';
 var API = 'https://script.google.com/macros/s/AKfycbwMccMP6rNIBN-iutoZVSfVqYasFBMve_L3eUG1JDRx5FhUtV1idSD72ImTmHms3ooa2w/exec';
 var LG = Storage.prototype.getItem, LS = Storage.prototype.setItem;   // originales (la pantalla después usa memoria aparte)
 function leer(k) { try { return LG.call(localStorage, k); } catch (e) { return null; } }
