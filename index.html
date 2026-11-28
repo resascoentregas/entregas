@@ -65,7 +65,7 @@
 <script>
 /* La pantalla de la app vive en Google (Apps Script) pero se muestra acá, sin el cartel de Google.
    Google queda solo como motor: cada pedido viaja con la clave secreta guardada en este aparato. */
-var WRAP_VER = '8';
+var WRAP_VER = '9';
 var API_ID = 'AKfycbwMccMP6rNIBN-iutoZVSfVqYasFBMve_L3eUG1JDRx5FhUtV1idSD72ImTmHms3ooa2w';
 var VIEJA = 'https://script.google.com/macros/s/AKfycbzn7PJlJKF0K5es5lEZd-x_ii8fZ2XYfdUVibRvcqHDJzjdB6Ra9vowjKOc5-fPcKxKGw/exec';
 var esPC = window.innerWidth >= 1000 && !/Android|iPhone|iPad/i.test(navigator.userAgent);
@@ -151,6 +151,62 @@ function puente() {
   setTimeout(revisar, 3000);
   setInterval(revisar, 5 * 60000);
   document.addEventListener('visibilitychange', function () { if (!document.hidden) revisar(); });
+
+  // Ícono nuevo: el teléfono no deja cambiarlo desde la página, así que se explica cómo volver a agregarlo (una vez por aparato)
+  (function () {
+    var ICONO = '5', NOMBRE = 'CeroKm', CODIGO = true;
+    function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+    var ua = navigator.userAgent, ios = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1), andr = /Android/i.test(ua);
+    var inst = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+    var apk = String(document.referrer || '').indexOf('android-app://') === 0;
+    var link = location.origin + location.pathname, aviso = null;
+    var css = 'position:fixed;inset:0;z-index:2147483646;display:flex;align-items:flex-end;justify-content:center;padding:16px;background:rgba(10,12,16,.7);font-family:-apple-system,system-ui,sans-serif';
+    var caja = 'max-width:380px;width:100%;color:#fff;background:#14171c;border:1px solid rgba(225,29,72,.45);border-radius:24px;padding:22px 20px calc(18px + env(safe-area-inset-bottom));box-shadow:0 20px 60px rgba(0,0,0,.5)';
+    var btn = 'display:block;width:100%;margin-top:10px;padding:14px;border:0;border-radius:14px;font:700 15px -apple-system,system-ui,sans-serif;cursor:pointer;';
+    function cerrar(fin) { if (fin) ls('iconoVisto', ICONO); try { sessionStorage.setItem('iconoLuego', '1'); } catch (e) {} if (aviso) aviso.remove(); aviso = null; }
+    function mostrar(cuerpo, botones) {
+      if (aviso || !document.body) return;
+      aviso = document.createElement('div'); aviso.setAttribute('style', css);
+      aviso.innerHTML = '<div style="' + caja + '"><div style="display:flex;gap:14px;align-items:center;margin-bottom:12px">' +
+        '<img src="icono-192.png?v=' + ICONO + '" alt="" style="width:58px;height:58px;border-radius:14px;flex:none">' +
+        '<div><div style="font-size:18px;font-weight:800">Ícono nuevo: ' + NOMBRE + '</div><div style="font-size:13px;color:#a3aab6;margin-top:2px">El teléfono no lo cambia solo</div></div></div>' +
+        '<div style="font-size:14.5px;line-height:1.55;color:#d6dae1">' + cuerpo + '</div>' + botones + '</div>';
+      document.body.appendChild(aviso);
+      aviso.querySelectorAll('[data-a]').forEach(function (b) { b.onclick = function () { acc(b.dataset.a, b); }; });
+    }
+    var bip = null;
+    function acc(a, b) {
+      if (a === 'listo') cerrar(true);
+      else if (a === 'luego') cerrar(false);
+      else if (a === 'copiar') { try { navigator.clipboard.writeText(link); b.textContent = '✓ Link copiado'; } catch (e) { prompt('Copiá este link:', link); } }
+      else if (a === 'chrome') location.href = 'intent://' + link.replace(/^https?:\/\//, '') + '#Intent;scheme=https;package=com.android.chrome;end';
+      else if (a === 'instalar' && bip) { bip.prompt(); bip.userChoice.then(function (r) { if (r.outcome === 'accepted') cerrar(true); }); }
+    }
+    var B1 = '<button data-a="listo" style="' + btn + 'background:#e11d48;color:#fff">Ya lo cambié</button>';
+    var B2 = '<button data-a="luego" style="' + btn + 'background:transparent;color:#a3aab6;margin-top:4px">Más tarde</button>';
+    var Bc = '<button data-a="copiar" style="' + btn + 'background:#232831;color:#fff">Copiar el link</button>';
+    var nota = CODIGO ? '<div style="font-size:12.5px;color:#a3aab6;margin-top:8px">Tené a mano tu código personal: al agregarla de nuevo te lo va a pedir.</div>' : '';
+    // En el navegador (ya sacaron el ícono viejo): botón para instalar con un toque
+    window.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault(); bip = e;
+      if (inst || ls('iconoVisto') === ICONO && ls('iconoInst') === '1') return;
+      if (ls('iconoQuito') !== '1') return;
+      mostrar('Tocá el botón y aceptá: queda en tu pantalla de inicio con el ícono nuevo.',
+        '<button data-a="instalar" style="' + btn + 'background:#e11d48;color:#fff">Instalar ' + NOMBRE + '</button>' + B2);
+    });
+    window.addEventListener('appinstalled', function () { ls('iconoInst', '1'); cerrar(true); });
+    setTimeout(function () {
+      if (!inst || apk || ls('iconoVisto') === ICONO) return;
+      try { if (sessionStorage.getItem('iconoLuego')) return; } catch (e) {}
+      if (ios) mostrar('<b>1.</b> En la pantalla de inicio, mantené apretado el ícono viejo y tocá <b>Eliminar app</b> (no se borra nada, es solo el acceso).<br>' +
+          '<b>2.</b> Abrí en <b>Safari</b> este link (copialo con el botón).<br><b>3.</b> Tocá compartir <span style="font-size:17px">⎋</span> y <b>Agregar a inicio</b>.' + nota, Bc + B1 + B2);
+      else if (andr) { ls('iconoQuito', '1');
+        mostrar('<b>1.</b> En la pantalla de inicio, mantené apretado el ícono viejo y tocá <b>Quitar</b> o <b>Desinstalar</b> (no se borra nada).<br>' +
+          '<b>2.</b> Tocá <b>Abrir en Chrome</b> acá abajo.<br><b>3.</b> Te va a aparecer el botón <b>Instalar ' + NOMBRE + '</b>.',
+          '<button data-a="chrome" style="' + btn + 'background:#e11d48;color:#fff">Abrir en Chrome</button>' + B1.replace('#e11d48;color:#fff', '#232831;color:#fff') + B2); }
+      else ls('iconoVisto', ICONO);   // PC: se actualiza sola
+    }, 2500);
+  })();
 }
 
 function mostrar(html, cfg) {
@@ -171,7 +227,7 @@ function arrancar(cfg) {
   fetch('https://script.google.com/macros/s/' + cfg.u + '/exec', { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ fn: '_html', args: [] }) })
     .then(function (r) { return r.json(); })
-    .then(function (j) { if (!j.ok) throw new Error(j.e); guardar('appHtml', j.r); mostrar(j.r, cfg); })
+    .then(function (j) { if (!j.ok) throw new Error(j.e); guardar('appHtml', j.r); guardar('iconoVisto', '5'); mostrar(j.r, cfg); })
     .catch(function () { formulario('No se pudo conectar. Revisá internet o el código.'); });
 }
 
